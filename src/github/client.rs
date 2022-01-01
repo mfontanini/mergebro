@@ -3,6 +3,7 @@ use super::models::{
 };
 use crate::client::{ApiClient, Result};
 use async_trait::async_trait;
+use serde_derive::Serialize;
 
 #[async_trait]
 pub trait GithubClient {
@@ -14,6 +15,8 @@ pub trait GithubClient {
     ) -> Result<Vec<PullRequestReview>>;
 
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection>;
+
+    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<()>;
 }
 
 #[derive(Clone)]
@@ -27,15 +30,19 @@ impl DefaultGithubClient {
             client: ApiClient::from_credentials(username, password),
         }
     }
+
+    fn make_pull_request_url(id: &PullRequestIdentifier) -> String {
+        format!(
+            "https://api.github.com/repos/{}/{}/pulls/{}",
+            id.owner, id.repo, id.pull_number
+        )
+    }
 }
 
 #[async_trait]
 impl GithubClient for DefaultGithubClient {
     async fn pull_request_info(&self, id: &PullRequestIdentifier) -> Result<PullRequest> {
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/pulls/{}",
-            id.owner, id.repo, id.pull_number
-        );
+        let url = Self::make_pull_request_url(id);
         self.client.get(&url).await
     }
 
@@ -43,10 +50,7 @@ impl GithubClient for DefaultGithubClient {
         &self,
         id: &PullRequestIdentifier,
     ) -> Result<Vec<PullRequestReview>> {
-        let url = format!(
-            "https://api.github.com/repos/{}/{}/pulls/{}/reviews",
-            id.owner, id.repo, id.pull_number
-        );
+        let url = format!("{}/reviews", Self::make_pull_request_url(id));
         self.client.get(&url).await
     }
 
@@ -57,4 +61,17 @@ impl GithubClient for DefaultGithubClient {
         );
         self.client.get(&url).await
     }
+
+    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<()> {
+        let url = format!("{}/update-branch", Self::make_pull_request_url(id));
+        let body = UpdateBranchRequest {
+            expected_head_sha: head_sha.into(),
+        };
+        self.client.put(&url, &body).await
+    }
+}
+
+#[derive(Serialize, Debug, PartialEq)]
+struct UpdateBranchRequest {
+    expected_head_sha: String,
 }

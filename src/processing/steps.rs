@@ -1,7 +1,7 @@
 use super::Error;
 use crate::github::{
-    Branch, BranchProtection, GithubClient, PullRequest, PullRequestIdentifier, PullRequestReview,
-    PullRequestState, ReviewState,
+    Branch, BranchProtection, GithubClient, MergeStateStatus, PullRequest, PullRequestIdentifier,
+    PullRequestReview, PullRequestState, ReviewState,
 };
 use async_trait::async_trait;
 use std::collections::HashSet;
@@ -35,8 +35,7 @@ pub enum StepStatus {
     Waiting,
 }
 
-// Concrete steps
-
+/// Checks whether a pull request is open and in a mergeable state.
 #[derive(Default)]
 pub struct CheckCurrentStateStep;
 
@@ -67,6 +66,8 @@ impl Step for CheckCurrentStateStep {
     }
 }
 
+/// Checks whether a pull request is approved by however many people its branch protection
+/// rules require
 pub struct CheckReviewsStep<G> {
     github: Arc<G>,
 }
@@ -126,5 +127,46 @@ impl<G: GithubClient + Send + Sync> Step for CheckReviewsStep<G> {
 
     fn name(&self) -> &'static str {
         "check reviews"
+    }
+}
+
+/// Checks whether a pull request is behind master, and updates it otherwise
+pub struct CheckBehindMaster<G> {
+    github: Arc<G>,
+}
+
+impl<G: GithubClient> CheckBehindMaster<G> {
+    pub fn new(github: Arc<G>) -> Self {
+        Self { github }
+    }
+}
+
+#[async_trait]
+impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
+    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
+        match context.pull_request.merge_status {
+            MergeStateStatus::Clean => return Ok(StepStatus::Passed),
+            MergeStateStatus::Behind => (),
+            _ => {
+                return Ok(StepStatus::CannotProceed {
+                    reason: "unknown merge state".into(),
+                })
+            }
+        }
+        let result = self
+            .github
+            .update_branch(&context.identifier, &context.pull_request.head.sha)
+            .await;
+        match result {
+            Ok(()) => Ok(StepStatus::Waiting),
+            // Technically we should retry but this means the head sha has _just_ changed so
+            // odds are someone just did it manually which means we're waiting either way
+            Err(e) if e.unprocessable_entity() => Ok(StepStatus::Waiting),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    fn name(&self) -> &'static str {
+        "behind master"
     }
 }

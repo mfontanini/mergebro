@@ -59,16 +59,29 @@ impl ApiClient {
         .await
     }
 
+    pub async fn put<I, O>(&self, endpoint: &str, body: &I) -> Result<O>
+    where
+        I: Serialize,
+        O: DeserializeOwned + Debug,
+    {
+        retry_request_if_needed(|| {
+            let builder = self.client.put(endpoint).json(body);
+            self.submit(builder)
+        })
+        .await
+    }
+
     async fn submit<O>(&self, builder: RequestBuilder) -> Result<O>
     where
         O: DeserializeOwned,
     {
         let builder = builder.basic_auth(&self.username, self.password.as_ref());
         let response = builder.send().await?;
-        if response.status() != StatusCode::OK {
-            return Err(Error::Http(response.status()));
+        if response.status().is_success() {
+            Ok(response.json().await?)
+        } else {
+            Err(Error::Http(response.status()))
         }
-        Ok(response.json().await?)
     }
 }
 
@@ -87,6 +100,10 @@ pub enum Error {
 impl Error {
     pub fn not_found(&self) -> bool {
         matches!(self, Self::Http(StatusCode::NOT_FOUND))
+    }
+
+    pub fn unprocessable_entity(&self) -> bool {
+        matches!(self, Self::Http(StatusCode::UNPROCESSABLE_ENTITY))
     }
 }
 

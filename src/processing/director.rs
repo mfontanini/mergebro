@@ -1,4 +1,6 @@
-use super::steps::{CheckCurrentStateStep, CheckReviewsStep, Context, Step, StepStatus};
+use super::steps::{
+    CheckBehindMaster, CheckCurrentStateStep, CheckReviewsStep, Context, Step, StepStatus,
+};
 use super::Error;
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info, warn};
@@ -25,6 +27,7 @@ impl<G: GithubClient + Send + Sync + 'static> Director<G> {
         vec![
             Box::new(CheckCurrentStateStep::default()),
             Box::new(CheckReviewsStep::new(github.clone())),
+            Box::new(CheckBehindMaster::new(github.clone())),
         ]
     }
 
@@ -37,7 +40,10 @@ impl<G: GithubClient + Send + Sync + 'static> Director<G> {
                     warn!("Cannot proceed: {}", reason);
                     return Ok(DirectorState::Done);
                 }
-                StepStatus::Waiting => return Ok(DirectorState::Pending),
+                StepStatus::Waiting => {
+                    debug!("Step '{}' is pending", step.name());
+                    return Ok(DirectorState::Pending);
+                }
                 StepStatus::Passed => debug!("Step '{}' passed", step.name()),
             };
         }

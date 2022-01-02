@@ -41,10 +41,10 @@ impl<G: GithubClient + Send + Sync + 'static> Director<G> {
                     return Ok(DirectorState::Done);
                 }
                 StepStatus::Waiting => {
-                    debug!("Step '{}' is pending", step.name());
+                    debug!("Step '{}' is pending", step);
                     return Ok(DirectorState::Pending);
                 }
-                StepStatus::Passed => debug!("Step '{}' passed", step.name()),
+                StepStatus::Passed => debug!("Step '{}' passed", step),
             };
         }
         info!("All checks passed, attempting to merge pull request");

@@ -5,12 +5,12 @@ use crate::github::{
 };
 use async_trait::async_trait;
 use std::collections::HashSet;
+use std::fmt;
 use std::sync::Arc;
 
 #[async_trait]
-pub trait Step {
+pub trait Step: fmt::Display {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error>;
-    fn name(&self) -> &'static str;
 }
 
 #[derive(Debug)]
@@ -60,9 +60,11 @@ impl Step for CheckCurrentStateStep {
             }),
         }
     }
+}
 
-    fn name(&self) -> &'static str {
-        "check current state"
+impl fmt::Display for CheckCurrentStateStep {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "check current state")
     }
 }
 
@@ -124,9 +126,11 @@ impl<G: GithubClient + Send + Sync> Step for CheckReviewsStep<G> {
             return Ok(StepStatus::Passed);
         }
     }
+}
 
-    fn name(&self) -> &'static str {
-        "check reviews"
+impl<G> fmt::Display for CheckReviewsStep<G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "check reviews")
     }
 }
 
@@ -165,8 +169,10 @@ impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
             Err(e) => Err(e.into()),
         }
     }
+}
 
-    fn name(&self) -> &'static str {
-        "behind master"
+impl<G> fmt::Display for CheckBehindMaster<G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "check if behind master")
     }
 }

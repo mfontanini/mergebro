@@ -148,14 +148,8 @@ impl<G: GithubClient> CheckBehindMaster<G> {
 #[async_trait]
 impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        match context.pull_request.merge_status {
-            MergeStateStatus::Clean => return Ok(StepStatus::Passed),
-            MergeStateStatus::Behind => (),
-            _ => {
-                return Ok(StepStatus::CannotProceed {
-                    reason: "unknown merge state".into(),
-                })
-            }
+        if !matches!(context.pull_request.merge_status, MergeStateStatus::Behind) {
+            return Ok(StepStatus::Passed);
         }
         let result = self
             .github

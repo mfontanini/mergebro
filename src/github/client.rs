@@ -1,5 +1,6 @@
 use super::models::{
-    Branch, BranchProtection, PullRequest, PullRequestIdentifier, PullRequestReview,
+    ActionRuns, Branch, BranchProtection, NoBody, PullRequest, PullRequestIdentifier,
+    PullRequestReview, Repository,
 };
 use crate::client::{ApiClient, Result};
 use async_trait::async_trait;
@@ -8,15 +9,14 @@ use serde_derive::Serialize;
 #[async_trait]
 pub trait GithubClient {
     async fn pull_request_info(&self, id: &PullRequestIdentifier) -> Result<PullRequest>;
-
     async fn pull_request_reviews(
         &self,
         id: &PullRequestIdentifier,
     ) -> Result<Vec<PullRequestReview>>;
-
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection>;
-
-    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<()>;
+    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody>;
+    async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns>;
+    async fn rerun_workflow(&self, repo: &Repository, run_id: u64) -> Result<NoBody>;
 }
 
 #[derive(Clone)]
@@ -62,12 +62,28 @@ impl GithubClient for DefaultGithubClient {
         self.client.get(&url).await
     }
 
-    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<()> {
+    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody> {
         let url = format!("{}/update-branch", Self::make_pull_request_url(id));
         let body = UpdateBranchRequest {
             expected_head_sha: head_sha.into(),
         };
         self.client.put(&url, &body).await
+    }
+
+    async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/runs?branch={}",
+            branch.repo.owner.login, branch.repo.name, branch.name,
+        );
+        self.client.get(&url).await
+    }
+
+    async fn rerun_workflow(&self, repo: &Repository, run_id: u64) -> Result<NoBody> {
+        let url = format!(
+            "https://api.github.com/repos/{}/{}/actions/runs/{}/rerun",
+            repo.owner.login, repo.name, run_id,
+        );
+        self.client.post(&url, &()).await
     }
 }
 

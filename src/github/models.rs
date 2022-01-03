@@ -3,7 +3,7 @@ use serde_derive::Deserialize;
 use thiserror::Error;
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
-pub enum MergeStateStatus {
+pub enum MergeableState {
     #[serde(rename = "behind")]
     Behind,
 
@@ -13,7 +13,7 @@ pub enum MergeStateStatus {
     #[serde(rename = "blocked")]
     Blocked,
 
-    #[serde(rename = "blocked")]
+    #[serde(rename = "unstable")]
     Unstable,
 
     #[serde(other, rename = "unknown")]
@@ -81,6 +81,7 @@ pub struct PullRequestReview {
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct Repository {
     pub name: String,
+    pub owner: User,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -96,8 +97,7 @@ pub struct Branch {
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub struct PullRequest {
-    #[serde(rename = "mergeable_state")]
-    pub merge_status: MergeStateStatus,
+    pub mergeable_state: MergeableState,
 
     #[serde(rename = "_links")]
     pub links: Links,
@@ -156,6 +156,51 @@ pub enum UrlParseError {
     #[error("malformed URL")]
     MalformedUrl,
 }
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct ActionRuns {
+    pub workflow_runs: Vec<WorkflowRun>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct WorkflowRun {
+    pub id: u64,
+    pub workflow_id: u64,
+    pub name: String,
+    pub head_sha: String,
+    pub status: WorfklowRunStatus,
+    pub conclusion: Option<WorkflowRunConclusion>,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub enum WorfklowRunStatus {
+    #[serde(rename = "completed")]
+    Completed,
+
+    #[serde(rename = "queued")]
+    Queued,
+
+    #[serde(rename = "in_progress")]
+    InProgress,
+
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub enum WorkflowRunConclusion {
+    #[serde(rename = "success")]
+    Success,
+
+    #[serde(rename = "failure")]
+    Failure,
+
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct NoBody {}
 
 #[cfg(test)]
 mod tests {

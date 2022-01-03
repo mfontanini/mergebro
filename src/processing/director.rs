@@ -1,5 +1,6 @@
 use super::steps::{
-    CheckBehindMaster, CheckCurrentStateStep, CheckReviewsStep, Context, Step, StepStatus,
+    CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Context, Step,
+    StepStatus,
 };
 use super::Error;
 use crate::github::{GithubClient, PullRequestIdentifier};
@@ -28,6 +29,7 @@ impl<G: GithubClient + Send + Sync + 'static> Director<G> {
             Box::new(CheckCurrentStateStep::default()),
             Box::new(CheckReviewsStep::new(github.clone())),
             Box::new(CheckBehindMaster::new(github.clone())),
+            Box::new(CheckBuildFailed::new(github.clone())),
         ]
     }
 

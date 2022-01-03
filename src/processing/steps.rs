@@ -1,9 +1,11 @@
 use super::Error;
 use crate::github::{
-    Branch, BranchProtection, GithubClient, MergeStateStatus, PullRequest, PullRequestIdentifier,
-    PullRequestReview, PullRequestState, ReviewState,
+    Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
+    PullRequestReview, PullRequestState, ReviewState, WorkflowRunConclusion,
 };
 use async_trait::async_trait;
+use log::info;
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
@@ -55,9 +57,9 @@ impl Step for CheckCurrentStateStep {
             PullRequestState::Closed => Ok(StepStatus::CannotProceed {
                 reason: "pull request is closed".into(),
             }),
-            PullRequestState::Unknown => Ok(StepStatus::CannotProceed {
-                reason: "pull request state is unknown".into(),
-            }),
+            PullRequestState::Unknown => Err(Error::UnsupportedPullRequestState(
+                "pull request state is unknown".into(),
+            )),
         }
     }
 }
@@ -148,7 +150,7 @@ impl<G: GithubClient> CheckBehindMaster<G> {
 #[async_trait]
 impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        if !matches!(context.pull_request.merge_status, MergeStateStatus::Behind) {
+        if !matches!(context.pull_request.mergeable_state, MergeableState::Behind) {
             return Ok(StepStatus::Passed);
         }
         let result = self
@@ -156,7 +158,7 @@ impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
             .update_branch(&context.identifier, &context.pull_request.head.sha)
             .await;
         match result {
-            Ok(()) => Ok(StepStatus::Waiting),
+            Ok(_) => Ok(StepStatus::Waiting),
             // Technically we should retry but this means the head sha has _just_ changed so
             // odds are someone just did it manually which means we're waiting either way
             Err(e) if e.unprocessable_entity() => Ok(StepStatus::Waiting),
@@ -168,5 +170,64 @@ impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
 impl<G> fmt::Display for CheckBehindMaster<G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check if behind master")
+    }
+}
+
+/// Checks whether the build for a pull request failed, re-triggering CI runs if needed
+pub struct CheckBuildFailed<G> {
+    github: Arc<G>,
+}
+
+impl<G: GithubClient> CheckBuildFailed<G> {
+    pub fn new(github: Arc<G>) -> Self {
+        Self { github }
+    }
+
+    async fn check_actions(&self, context: &Context) -> Result<(), Error> {
+        // TODO: make sure head vs base is right here for forks
+        let action_runs = self.github.action_runs(&context.pull_request.head).await?;
+        let mut last_run_per_workflow = HashMap::new();
+        for run in action_runs.workflow_runs {
+            if run.head_sha != context.pull_request.head.sha {
+                continue;
+            }
+            last_run_per_workflow.entry(run.workflow_id).or_insert(run);
+        }
+        if last_run_per_workflow.is_empty() {
+            // This means we currently can't handle whatever led the PR to be unstable
+            return Err(Error::UnsupportedPullRequestState(
+                "reason why pull request is unstable is unknown".into(),
+            ));
+        }
+        for run in last_run_per_workflow.values() {
+            if run.conclusion == Some(WorkflowRunConclusion::Failure) {
+                info!("Workflow '{}' failed, re-running it", run.name);
+                self.github
+                    .rerun_workflow(&context.pull_request.base.repo, run.id)
+                    .await?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl<G: GithubClient + Send + Sync> Step for CheckBuildFailed<G> {
+    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
+        if !matches!(
+            context.pull_request.mergeable_state,
+            MergeableState::Unstable
+        ) {
+            return Ok(StepStatus::Passed);
+        }
+        // TODO: check for status checks as well
+        self.check_actions(context).await?;
+        Ok(StepStatus::Waiting)
+    }
+}
+
+impl<G> fmt::Display for CheckBuildFailed<G> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "check if build failed")
     }
 }

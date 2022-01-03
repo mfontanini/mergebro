@@ -4,6 +4,7 @@ use mergebro::{
     github::{DefaultGithubClient, PullRequestIdentifier},
     Director, DirectorState,
 };
+use reqwest::Url;
 use std::env;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -17,8 +18,8 @@ async fn main() {
     let github_token = env::var("GITHUB_API_TOKEN").unwrap();
 
     let client = DefaultGithubClient::new(github_user, github_token);
-    let identifier =
-        PullRequestIdentifier::from_app_url(&std::env::args().nth(1).expect("Missing PR")).unwrap();
+    let url = Url::parse(&std::env::args().nth(1).expect("Missing PR")).expect("invalid url");
+    let identifier = PullRequestIdentifier::from_app_url(&url).unwrap();
 
     let mut director = Director::new(client, identifier);
     loop {

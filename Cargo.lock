@@ -429,7 +429,6 @@ dependencies = [
  "backoff",
  "chrono",
  "env_logger",
- "lazy_static",
  "log",
  "regex",
  "reqwest",

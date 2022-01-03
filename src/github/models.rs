@@ -1,4 +1,4 @@
-use regex::Regex;
+use reqwest::Url;
 use serde_derive::Deserialize;
 use thiserror::Error;
 
@@ -133,28 +133,36 @@ pub struct PullRequestIdentifier {
 }
 
 impl PullRequestIdentifier {
-    pub fn from_app_url(url: &str) -> Result<Self, UrlParseError> {
-        lazy_static! {
-            static ref RE: Regex =
-                Regex::new(r"^https://github.com/([\w_-]+)/([\w_-]+)/pull/([\d]+)$").unwrap();
+    pub fn from_app_url(url: &Url) -> Result<Self, InvalidUrlError> {
+        if url.domain() != Some("github.com") {
+            return Err(InvalidUrlError::InvalidDomain);
         }
-        if let Some(capture) = RE.captures_iter(url).next() {
-            let pull_request_url = Self {
-                owner: capture[1].into(),
-                repo: capture[2].into(),
-                pull_number: capture[3].parse().unwrap(),
-            };
-            Ok(pull_request_url)
-        } else {
-            Err(UrlParseError::MalformedUrl)
+        let path_parts: Vec<_> = url
+            .path_segments()
+            .ok_or(InvalidUrlError::NotPullRequestUrl)?
+            .collect();
+        if path_parts.len() != 4 || path_parts[2] != "pull" {
+            return Err(InvalidUrlError::NotPullRequestUrl);
         }
+        let pull_number = path_parts[3]
+            .parse()
+            .map_err(|_| InvalidUrlError::NotPullRequestUrl)?;
+        let pull_request_url = Self {
+            owner: path_parts[0].into(),
+            repo: path_parts[1].into(),
+            pull_number,
+        };
+        Ok(pull_request_url)
     }
 }
 
 #[derive(Error, Debug, PartialEq, Clone)]
-pub enum UrlParseError {
-    #[error("malformed URL")]
-    MalformedUrl,
+pub enum InvalidUrlError {
+    #[error("invalid domain")]
+    InvalidDomain,
+
+    #[error("not a pull request URL")]
+    NotPullRequestUrl,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -208,18 +216,25 @@ mod tests {
 
     #[test]
     fn pull_request_from_app_url() {
-        let pr = PullRequestIdentifier::from_app_url("https://github.com/potato/smasher/pull/1337")
-            .unwrap();
+        let pr = PullRequestIdentifier::from_app_url(
+            &Url::parse("https://github.com/potato/smasher/pull/1337").unwrap(),
+        )
+        .unwrap();
         assert_eq!(pr.owner, "potato");
         assert_eq!(pr.repo, "smasher");
         assert_eq!(pr.pull_number, 1337);
 
-        assert!(
-            PullRequestIdentifier::from_app_url("https://github.com/potato/smasher/pull/").is_err()
-        );
-        assert!(PullRequestIdentifier::from_app_url("https://github.com//smasher/pull/").is_err());
-        assert!(
-            PullRequestIdentifier::from_app_url("https://github.com/potato/pull/1337").is_err()
-        );
+        assert!(PullRequestIdentifier::from_app_url(
+            &Url::parse("https://github.com/potato/smasher/pull/").unwrap()
+        )
+        .is_err());
+        assert!(PullRequestIdentifier::from_app_url(
+            &Url::parse("https://github.com//smasher/pull/").unwrap()
+        )
+        .is_err());
+        assert!(PullRequestIdentifier::from_app_url(
+            &Url::parse("https://github.com/potato/pull/1337").unwrap()
+        )
+        .is_err());
     }
 }

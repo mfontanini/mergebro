@@ -3,6 +3,7 @@ use super::steps::{
     StepStatus,
 };
 use super::Error;
+use crate::circleci::CircleCiClient;
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info, warn};
 use std::sync::Arc;
@@ -13,10 +14,17 @@ pub struct Director<G> {
     steps: Vec<Box<dyn Step>>,
 }
 
-impl<G: GithubClient + Send + Sync + 'static> Director<G> {
-    pub fn new(github: G, identifier: PullRequestIdentifier) -> Self {
+impl<G> Director<G>
+where
+    G: GithubClient + Send + Sync + 'static,
+{
+    pub fn new<C>(github: G, circleci: C, identifier: PullRequestIdentifier) -> Self
+    where
+        C: CircleCiClient + Send + Sync + 'static,
+    {
         let github = Arc::new(github);
-        let steps = Self::build_steps(&github);
+        let circleci = Arc::new(circleci);
+        let steps = Self::build_steps(&github, &circleci);
         Self {
             github,
             identifier,
@@ -24,12 +32,15 @@ impl<G: GithubClient + Send + Sync + 'static> Director<G> {
         }
     }
 
-    fn build_steps(github: &Arc<G>) -> Vec<Box<dyn Step>> {
+    fn build_steps<C>(github: &Arc<G>, circleci: &Arc<C>) -> Vec<Box<dyn Step>>
+    where
+        C: CircleCiClient + Send + Sync + 'static,
+    {
         vec![
             Box::new(CheckCurrentStateStep::default()),
             Box::new(CheckReviewsStep::new(github.clone())),
             Box::new(CheckBehindMaster::new(github.clone())),
-            Box::new(CheckBuildFailed::new(github.clone())),
+            Box::new(CheckBuildFailed::new(github.clone(), circleci.clone())),
         ]
     }
 

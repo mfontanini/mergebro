@@ -7,4 +7,7 @@ pub enum Error {
 
     #[error("unsupported pull request state: {0}")]
     UnsupportedPullRequestState(String),
+
+    #[error("{0}")]
+    Generic(String),
 }

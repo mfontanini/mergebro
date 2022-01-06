@@ -1,5 +1,6 @@
 use reqwest::Url;
 use serde_derive::Deserialize;
+use std::ops::Deref;
 use thiserror::Error;
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -37,8 +38,10 @@ pub struct Link {
     href: String,
 }
 
-impl AsRef<str> for Link {
-    fn as_ref(&self) -> &str {
+impl Deref for Link {
+    type Target = str;
+
+    fn deref(&self) -> &str {
         &self.href
     }
 }
@@ -202,6 +205,29 @@ pub enum WorkflowRunConclusion {
 
     #[serde(rename = "failure")]
     Failure,
+
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub struct Status {
+    pub target_url: String,
+    pub state: StatusState,
+    pub created_at: chrono::DateTime<chrono::Local>,
+    pub context: String,
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq)]
+pub enum StatusState {
+    #[serde(rename = "success")]
+    Success,
+
+    #[serde(rename = "failure")]
+    Failure,
+
+    #[serde(rename = "pending")]
+    Pending,
 
     #[serde(other)]
     Unknown,

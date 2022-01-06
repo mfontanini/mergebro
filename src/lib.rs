@@ -1,3 +1,4 @@
+pub mod circleci;
 pub mod client;
 pub mod github;
 pub mod processing;

@@ -1,10 +1,12 @@
 use super::Error;
+use crate::circleci::{workflows::WorkflowRunner, CircleCiClient};
 use crate::github::{
     Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
-    PullRequestReview, PullRequestState, ReviewState, WorkflowRunConclusion,
+    PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
 };
 use async_trait::async_trait;
 use log::info;
+use reqwest::Url;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
@@ -17,8 +19,8 @@ pub trait Step: fmt::Display {
 
 #[derive(Debug)]
 pub struct Context {
-    identifier: PullRequestIdentifier,
-    pull_request: PullRequest,
+    pub identifier: PullRequestIdentifier,
+    pub pull_request: PullRequest,
 }
 
 impl Context {
@@ -108,10 +110,9 @@ impl<G: GithubClient + Send + Sync> Step for CheckReviewsStep<G> {
         let branch_protection = self
             .fetch_branch_protection(&context.pull_request.base)
             .await?;
-        let approvals_needed = branch_protection.reviews.approvals as usize;
-        if approvals_needed == 0 {
-            return Ok(StepStatus::Passed);
-        }
+        // TODO: make this minimum configurable and possibly only fall back if we get 404 on
+        // the branch protection endpoint
+        let approvals_needed = (branch_protection.reviews.approvals as usize).min(1);
         let reviews = self
             .github
             .pull_request_reviews(&context.identifier)
@@ -174,16 +175,21 @@ impl<G> fmt::Display for CheckBehindMaster<G> {
 }
 
 /// Checks whether the build for a pull request failed, re-triggering CI runs if needed
-pub struct CheckBuildFailed<G> {
+pub struct CheckBuildFailed<G, C> {
     github: Arc<G>,
+    circleci_runner: WorkflowRunner<C>,
 }
 
-impl<G: GithubClient> CheckBuildFailed<G> {
-    pub fn new(github: Arc<G>) -> Self {
-        Self { github }
+impl<G: GithubClient, C: CircleCiClient> CheckBuildFailed<G, C> {
+    pub fn new(github: Arc<G>, circleci: Arc<C>) -> Self {
+        let circleci_runner = WorkflowRunner::new(circleci);
+        Self {
+            github,
+            circleci_runner,
+        }
     }
 
-    async fn check_actions(&self, context: &Context) -> Result<(), Error> {
+    async fn check_actions(&self, context: &Context) -> Result<StepStatus, Error> {
         // TODO: make sure head vs base is right here for forks
         let action_runs = self.github.action_runs(&context.pull_request.head).await?;
         let mut last_run_per_workflow = HashMap::new();
@@ -193,40 +199,124 @@ impl<G: GithubClient> CheckBuildFailed<G> {
             }
             last_run_per_workflow.entry(run.workflow_id).or_insert(run);
         }
-        if last_run_per_workflow.is_empty() {
-            // This means we currently can't handle whatever led the PR to be unstable
-            return Err(Error::UnsupportedPullRequestState(
-                "reason why pull request is unstable is unknown".into(),
-            ));
+        let failed_workflows: Vec<_> = last_run_per_workflow
+            .values()
+            .filter(|run| run.conclusion == Some(WorkflowRunConclusion::Failure))
+            .collect();
+        if failed_workflows.is_empty() {
+            return Ok(StepStatus::Passed);
         }
-        for run in last_run_per_workflow.values() {
-            if run.conclusion == Some(WorkflowRunConclusion::Failure) {
-                info!("Workflow '{}' failed, re-running it", run.name);
-                self.github
-                    .rerun_workflow(&context.pull_request.base.repo, run.id)
+        for run in failed_workflows {
+            info!("Workflow '{}' failed, re-running it", run.name);
+            self.github
+                .rerun_workflow(&context.pull_request.base.repo, run.id)
+                .await?;
+        }
+        Ok(StepStatus::Waiting)
+    }
+
+    async fn check_statuses(&self, context: &Context) -> Result<StepStatus, Error> {
+        let summaries = self.fetch_status_summaries(context).await?;
+        match summaries.pending_statuses.len() {
+            0 => {
+                if summaries.failed_statuses.is_empty() {
+                    return Ok(StepStatus::Passed);
+                }
+                info!("Processing {} failed jobs", summaries.failed_statuses.len());
+                let failed_job_urls = summaries.failed_statuses.iter().map(|summary| &summary.url);
+                self.circleci_runner
+                    .process_failed_jobs(failed_job_urls)
                     .await?;
             }
-        }
-        Ok(())
+            1 => {
+                info!(
+                    "Waiting for job '{}' to finish running",
+                    summaries.pending_statuses[0].name
+                );
+            }
+            _ => {
+                info!(
+                    "Waiting for {} jobs to finish running",
+                    summaries.pending_statuses.len()
+                );
+            }
+        };
+        Ok(StepStatus::Waiting)
     }
+
+    async fn fetch_status_summaries(&self, context: &Context) -> Result<StatusSummaries, Error> {
+        let statuses = self
+            .github
+            .pull_request_statuses(&context.pull_request)
+            .await?;
+        let mut last_run_per_status = HashMap::new();
+        for status in statuses {
+            let url = Self::parse_status_url(&status.target_url)?;
+            last_run_per_status.entry(url).or_insert(status);
+        }
+        let mut failed_statuses = Vec::new();
+        let mut pending_statuses = Vec::new();
+        for (url, status) in last_run_per_status {
+            let summary = StatusSummary {
+                url,
+                name: status.context,
+            };
+            match status.state {
+                StatusState::Failure => failed_statuses.push(summary),
+                StatusState::Pending => pending_statuses.push(summary),
+                _ => (),
+            };
+        }
+        Ok(StatusSummaries {
+            pending_statuses,
+            failed_statuses,
+        })
+    }
+
+    fn parse_status_url(url: &str) -> Result<Url, Error> {
+        let url = Url::parse(url)
+            .map_err(|_| Error::Generic(format!("invalid status target URL: {}", url)))?;
+        Ok(url)
+    }
+}
+
+struct StatusSummary {
+    url: Url,
+    name: String,
+}
+
+struct StatusSummaries {
+    pending_statuses: Vec<StatusSummary>,
+    failed_statuses: Vec<StatusSummary>,
 }
 
 #[async_trait]
-impl<G: GithubClient + Send + Sync> Step for CheckBuildFailed<G> {
+impl<G, C> Step for CheckBuildFailed<G, C>
+where
+    G: GithubClient + Send + Sync,
+    C: CircleCiClient + Send + Sync,
+{
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        if !matches!(
-            context.pull_request.mergeable_state,
-            MergeableState::Unstable
-        ) {
+        // TODO: consider restricting this more
+        if matches!(context.pull_request.mergeable_state, MergeableState::Clean) {
             return Ok(StepStatus::Passed);
         }
-        // TODO: check for status checks as well
-        self.check_actions(context).await?;
-        Ok(StepStatus::Waiting)
+        let statuses_result = self.check_statuses(context).await?;
+        let actions_result = self.check_actions(context).await?;
+        if (statuses_result, actions_result) == (StepStatus::Passed, StepStatus::Passed)
+            && context.pull_request.mergeable_state == MergeableState::Unstable
+        {
+            // This means we don't currently support whatever led this PR to be unstable
+            return Err(Error::Generic(
+                "pull request is unstable for unknown reasons".into(),
+            ));
+        } else {
+            Ok(StepStatus::Waiting)
+        }
     }
 }
 
-impl<G> fmt::Display for CheckBuildFailed<G> {
+impl<G, C> fmt::Display for CheckBuildFailed<G, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check if build failed")
     }

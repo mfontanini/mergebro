@@ -1,6 +1,6 @@
 use super::models::{
     ActionRuns, Branch, BranchProtection, NoBody, PullRequest, PullRequestIdentifier,
-    PullRequestReview, Repository,
+    PullRequestReview, Repository, Status,
 };
 use crate::client::{ApiClient, Result};
 use async_trait::async_trait;
@@ -13,6 +13,7 @@ pub trait GithubClient {
         &self,
         id: &PullRequestIdentifier,
     ) -> Result<Vec<PullRequestReview>>;
+    async fn pull_request_statuses(&self, pull_request: &PullRequest) -> Result<Vec<Status>>;
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection>;
     async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody>;
     async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns>;
@@ -52,6 +53,10 @@ impl GithubClient for DefaultGithubClient {
     ) -> Result<Vec<PullRequestReview>> {
         let url = format!("{}/reviews", Self::make_pull_request_url(id));
         self.client.get(&url).await
+    }
+
+    async fn pull_request_statuses(&self, pull_request: &PullRequest) -> Result<Vec<Status>> {
+        self.client.get(&pull_request.links.statuses).await
     }
 
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection> {

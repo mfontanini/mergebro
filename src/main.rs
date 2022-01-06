@@ -1,6 +1,7 @@
 use env_logger::Env;
 use log::{debug, error};
 use mergebro::{
+    circleci::DefaultCircleCiClient,
     github::{DefaultGithubClient, PullRequestIdentifier},
     Director, DirectorState,
 };
@@ -16,12 +17,14 @@ async fn main() {
     // TODO: parametrize
     let github_user = env::var("GITHUB_API_USER").unwrap();
     let github_token = env::var("GITHUB_API_TOKEN").unwrap();
+    let circleci_token = env::var("CIRCLECI_API_TOKEN").unwrap();
 
-    let client = DefaultGithubClient::new(github_user, github_token);
+    let github_client = DefaultGithubClient::new(github_user, github_token);
+    let circleci_client = DefaultCircleCiClient::new(circleci_token);
     let url = Url::parse(&std::env::args().nth(1).expect("Missing PR")).expect("invalid url");
     let identifier = PullRequestIdentifier::from_app_url(&url).unwrap();
 
-    let mut director = Director::new(client, identifier);
+    let mut director = Director::new(github_client, circleci_client, identifier);
     loop {
         match director.run().await {
             Ok(DirectorState::Pending) => {

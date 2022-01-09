@@ -1,11 +1,43 @@
+use crate::github::MergeMethod;
 use config::{Config, ConfigError, Environment, File};
 use serde_derive::Deserialize;
 
 #[derive(Deserialize, Debug)]
 pub struct MergebroConfig {
     pub github: GithubConfig,
+
+    #[serde(default)]
+    pub merge: MergeConfig,
+
+    #[serde(default)]
+    pub poll: PollConfig,
+
     #[serde(default)]
     pub workflows: WorkflowsConfig,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PollConfig {
+    pub delay_seconds: u8,
+}
+
+impl Default for PollConfig {
+    fn default() -> PollConfig {
+        PollConfig { delay_seconds: 30 }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct MergeConfig {
+    pub default_method: MergeMethod,
+}
+
+impl Default for MergeConfig {
+    fn default() -> MergeConfig {
+        MergeConfig {
+            default_method: MergeMethod::Merge,
+        }
+    }
 }
 
 #[derive(Deserialize, Debug)]

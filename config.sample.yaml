@@ -1,0 +1,20 @@
+# Your Github username and API token
+github:
+  username: my_github_username
+  token: my_github_api_token
+
+# Optional CircleCI token
+workflows:
+  circleci:
+    token: my_circleci_token
+
+# The default pull request merge method. Can be:
+#
+# * "merge" to create a merge commit. This is the default.
+# * "squash" to squash the pull request commits into a single one.
+# * "rebase" to add all commits in the pull request into the target branch individually.
+#
+# Note that the repository may be configured to only allow a subset of these. This means
+# we will try the default method but otherwise attempt the other 2 if the default one failed.
+merge:
+  default_method: squash

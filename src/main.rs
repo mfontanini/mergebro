@@ -2,7 +2,7 @@ use env_logger::Env;
 use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
-    github::{DefaultGithubClient, MergeMethod, PullRequestIdentifier},
+    github::{DefaultGithubClient, PullRequestIdentifier},
     Director, DirectorState, MergeConfig, MergebroConfig, PullRequestMerger, WorkflowRunner,
 };
 use reqwest::Url;
@@ -53,12 +53,11 @@ async fn main() {
         info!("Using {} external workflow runners", workflow_runners.len());
     }
 
-    // TODO: configurable
     let merger = PullRequestMerger::new(MergeConfig {
-        default_merge_method: MergeMethod::Squash,
+        default_merge_method: config.merge.default_method,
     });
-    let sleep_duration = Duration::from_secs(30);
 
+    let sleep_duration = Duration::from_secs(config.poll.delay_seconds as u64);
     info!(
         "Starting loop on pull request: {}/{}/pulls/{} using github user {}",
         identifier.owner, identifier.repo, identifier.pull_number, config.github.username

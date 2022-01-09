@@ -1,5 +1,5 @@
 use reqwest::Url;
-use serde_derive::Deserialize;
+use serde_derive::{Deserialize, Serialize};
 use std::ops::Deref;
 use thiserror::Error;
 
@@ -114,6 +114,7 @@ pub struct PullRequest {
     pub base: Branch,
     pub merged: bool,
     pub draft: bool,
+    pub body: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]
@@ -231,6 +232,18 @@ pub enum StatusState {
 
     #[serde(other)]
     Unknown,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub enum MergeMethod {
+    #[serde(rename = "merge")]
+    Merge,
+
+    #[serde(rename = "squash")]
+    Squash,
+
+    #[serde(rename = "rebase")]
+    Rebase,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]

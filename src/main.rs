@@ -1,9 +1,9 @@
 use env_logger::Env;
-use log::{debug, error};
+use log::{error, info};
 use mergebro::{
     circleci::DefaultCircleCiClient,
-    github::{DefaultGithubClient, PullRequestIdentifier},
-    Director, DirectorState,
+    github::{DefaultGithubClient, MergeMethod, PullRequestIdentifier},
+    Director, DirectorState, MergeConfig, PullRequestMerger,
 };
 use reqwest::Url;
 use std::env;
@@ -12,7 +12,7 @@ use tokio::time::sleep;
 
 #[tokio::main]
 async fn main() {
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
     // TODO: parametrize
     let github_user = env::var("GITHUB_API_USER").unwrap();
@@ -24,12 +24,19 @@ async fn main() {
     let url = Url::parse(&std::env::args().nth(1).expect("Missing PR")).expect("invalid url");
     let identifier = PullRequestIdentifier::from_app_url(&url).unwrap();
 
-    let mut director = Director::new(github_client, circleci_client, identifier);
+    // TODO: configurable
+    let merger = PullRequestMerger::new(MergeConfig {
+        default_merge_method: MergeMethod::Squash,
+    });
+    let sleep_duration = Duration::from_secs(30);
+
+    let mut director = Director::new(github_client, circleci_client, identifier, merger);
     loop {
+        info!("Running checks on pull request...");
         match director.run().await {
             Ok(DirectorState::Pending) => {
-                debug!("Waiting for pull request to be ready");
-                sleep(Duration::from_secs(30)).await;
+                info!("Sleeping for {} seconds", sleep_duration.as_secs());
+                sleep(sleep_duration).await;
             }
             Ok(DirectorState::Done) => {
                 break;

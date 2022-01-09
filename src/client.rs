@@ -105,6 +105,10 @@ impl Error {
     pub fn unprocessable_entity(&self) -> bool {
         matches!(self, Self::Http(StatusCode::UNPROCESSABLE_ENTITY))
     }
+
+    pub fn method_not_allowed(&self) -> bool {
+        matches!(self, Self::Http(StatusCode::METHOD_NOT_ALLOWED))
+    }
 }
 
 async fn retry_request_if_needed<F, R, O>(requestor: F) -> Result<O>

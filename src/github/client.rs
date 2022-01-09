@@ -3,6 +3,7 @@ use super::models::{
     PullRequestReview, Repository, Status,
 };
 use crate::client::{ApiClient, Result};
+use crate::github::MergeMethod;
 use async_trait::async_trait;
 use serde_derive::Serialize;
 
@@ -18,6 +19,20 @@ pub trait GithubClient {
     async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody>;
     async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns>;
     async fn rerun_workflow(&self, repo: &Repository, run_id: u64) -> Result<NoBody>;
+    async fn merge_pull_request(
+        &self,
+        id: &PullRequestIdentifier,
+        body: &MergeRequestBody,
+    ) -> Result<NoBody>; // TODO: add body
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct MergeRequestBody {
+    pub sha: String,
+    pub commit_title: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub commit_message: Option<String>,
+    pub merge_method: MergeMethod,
 }
 
 #[derive(Clone)]
@@ -26,6 +41,8 @@ pub struct DefaultGithubClient {
 }
 
 impl DefaultGithubClient {
+    const API_BASE: &'static str = "https://api.github.com";
+
     pub fn new<U: Into<String>, P: Into<String>>(username: U, password: P) -> Self {
         Self {
             client: ApiClient::from_credentials(username, password),
@@ -34,8 +51,11 @@ impl DefaultGithubClient {
 
     fn make_pull_request_url(id: &PullRequestIdentifier) -> String {
         format!(
-            "https://api.github.com/repos/{}/{}/pulls/{}",
-            id.owner, id.repo, id.pull_number
+            "{}/repos/{}/{}/pulls/{}",
+            Self::API_BASE,
+            id.owner,
+            id.repo,
+            id.pull_number
         )
     }
 }
@@ -61,8 +81,11 @@ impl GithubClient for DefaultGithubClient {
 
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection> {
         let url = format!(
-            "https://api.github.com/repos/{}/{}/branches/{}/protection",
-            branch.user.login, branch.repo.name, branch.name,
+            "{}/repos/{}/{}/branches/{}/protection",
+            Self::API_BASE,
+            branch.user.login,
+            branch.repo.name,
+            branch.name,
         );
         self.client.get(&url).await
     }
@@ -77,18 +100,33 @@ impl GithubClient for DefaultGithubClient {
 
     async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns> {
         let url = format!(
-            "https://api.github.com/repos/{}/{}/actions/runs?branch={}",
-            branch.repo.owner.login, branch.repo.name, branch.name,
+            "{}/repos/{}/{}/actions/runs?branch={}",
+            Self::API_BASE,
+            branch.repo.owner.login,
+            branch.repo.name,
+            branch.name,
         );
         self.client.get(&url).await
     }
 
     async fn rerun_workflow(&self, repo: &Repository, run_id: u64) -> Result<NoBody> {
         let url = format!(
-            "https://api.github.com/repos/{}/{}/actions/runs/{}/rerun",
-            repo.owner.login, repo.name, run_id,
+            "{}/repos/{}/{}/actions/runs/{}/rerun",
+            Self::API_BASE,
+            repo.owner.login,
+            repo.name,
+            run_id,
         );
         self.client.post(&url, &()).await
+    }
+
+    async fn merge_pull_request(
+        &self,
+        id: &PullRequestIdentifier,
+        body: &MergeRequestBody,
+    ) -> Result<NoBody> {
+        let url = format!("{}/merge", Self::make_pull_request_url(id));
+        self.client.put(&url, body).await
     }
 }
 

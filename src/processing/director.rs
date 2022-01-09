@@ -2,7 +2,7 @@ use super::steps::{
     CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Context, Step,
     StepStatus,
 };
-use super::Error;
+use super::{Error, PullRequestMerger};
 use crate::circleci::CircleCiClient;
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info, warn};
@@ -12,13 +12,19 @@ pub struct Director<G> {
     github: Arc<G>,
     identifier: PullRequestIdentifier,
     steps: Vec<Box<dyn Step>>,
+    merger: PullRequestMerger,
 }
 
 impl<G> Director<G>
 where
     G: GithubClient + Send + Sync + 'static,
 {
-    pub fn new<C>(github: G, circleci: C, identifier: PullRequestIdentifier) -> Self
+    pub fn new<C>(
+        github: G,
+        circleci: C,
+        identifier: PullRequestIdentifier,
+        merger: PullRequestMerger,
+    ) -> Self
     where
         C: CircleCiClient + Send + Sync + 'static,
     {
@@ -29,6 +35,7 @@ where
             github,
             identifier,
             steps,
+            merger,
         }
     }
 
@@ -54,18 +61,22 @@ where
                     return Ok(DirectorState::Done);
                 }
                 StepStatus::Waiting => {
-                    debug!("Step '{}' is pending", step);
+                    info!("Step '{}' is pending", step);
                     return Ok(DirectorState::Pending);
                 }
                 StepStatus::Passed => debug!("Step '{}' passed", step),
             };
         }
         info!("All checks passed, attempting to merge pull request");
-        // TODO: attempt merging
-        Ok(DirectorState::Pending)
+        self.merger
+            .merge(&context.identifier, &context.pull_request, &*self.github)
+            .await?;
+        info!("Pull request merged ✔️");
+        Ok(DirectorState::Done)
     }
 
     async fn build_context(&self) -> Result<Context, Error> {
+        debug!("Fetching pull request context");
         let info = self.github.pull_request_info(&self.identifier).await?;
         Ok(Context::new(self.identifier.clone(), info))
     }

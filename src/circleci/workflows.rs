@@ -35,7 +35,10 @@ impl<C: CircleCiClient> WorkflowRunner<C> {
         if failed_workflow_ids.is_empty() {
             return Ok(());
         }
-        info!("Re-running {} failed workflows", failed_workflow_ids.len());
+        info!(
+            "Re-running {} failed circleci workflows",
+            failed_workflow_ids.len()
+        );
         for workflow_id in failed_workflow_ids {
             self.client.rerun_workflow(&workflow_id).await?;
         }

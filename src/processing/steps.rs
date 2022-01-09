@@ -47,10 +47,19 @@ pub struct CheckCurrentStateStep;
 impl Step for CheckCurrentStateStep {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
         match context.pull_request.state {
-            PullRequestState::Open if context.pull_request.draft => Ok(StepStatus::CannotProceed {
-                reason: "pull request is a draft".into(),
-            }),
-            PullRequestState::Open => Ok(StepStatus::Passed),
+            PullRequestState::Open => {
+                if context.pull_request.draft {
+                    Ok(StepStatus::CannotProceed {
+                        reason: "pull request is a draft".into(),
+                    })
+                } else if matches!(context.pull_request.mergeable_state, MergeableState::Dirty) {
+                    Ok(StepStatus::CannotProceed {
+                        reason: "pull request has conflicts".into(),
+                    })
+                } else {
+                    Ok(StepStatus::Passed)
+                }
+            }
             PullRequestState::Closed if context.pull_request.merged => {
                 Ok(StepStatus::CannotProceed {
                     reason: "pull request is already merged".into(),
@@ -207,7 +216,7 @@ impl<G: GithubClient, C: CircleCiClient> CheckBuildFailed<G, C> {
             return Ok(StepStatus::Passed);
         }
         for run in failed_workflows {
-            info!("Workflow '{}' failed, re-running it", run.name);
+            info!("Actions workflow '{}' failed, re-running it", run.name);
             self.github
                 .rerun_workflow(&context.pull_request.base.repo, run.id)
                 .await?;
@@ -222,7 +231,10 @@ impl<G: GithubClient, C: CircleCiClient> CheckBuildFailed<G, C> {
                 if summaries.failed_statuses.is_empty() {
                     return Ok(StepStatus::Passed);
                 }
-                info!("Processing {} failed jobs", summaries.failed_statuses.len());
+                info!(
+                    "Processing {} failed external jobs",
+                    summaries.failed_statuses.len()
+                );
                 let failed_job_urls = summaries.failed_statuses.iter().map(|summary| &summary.url);
                 self.circleci_runner
                     .process_failed_jobs(failed_job_urls)
@@ -230,13 +242,13 @@ impl<G: GithubClient, C: CircleCiClient> CheckBuildFailed<G, C> {
             }
             1 => {
                 info!(
-                    "Waiting for job '{}' to finish running",
+                    "Waiting for external job '{}' to finish running",
                     summaries.pending_statuses[0].name
                 );
             }
             _ => {
                 info!(
-                    "Waiting for {} jobs to finish running",
+                    "Waiting for {} external jobs to finish running",
                     summaries.pending_statuses.len()
                 );
             }
@@ -318,6 +330,6 @@ where
 
 impl<G, C> fmt::Display for CheckBuildFailed<G, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "check if build failed")
+        write!(f, "check if CI builds failed")
     }
 }

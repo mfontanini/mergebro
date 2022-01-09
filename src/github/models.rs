@@ -17,6 +17,9 @@ pub enum MergeableState {
     #[serde(rename = "unstable")]
     Unstable,
 
+    #[serde(rename = "dirty")]
+    Dirty,
+
     #[serde(other, rename = "unknown")]
     Unknown,
 }

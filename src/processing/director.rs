@@ -2,8 +2,7 @@ use super::steps::{
     CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Context, Step,
     StepStatus,
 };
-use super::{Error, PullRequestMerger};
-use crate::circleci::CircleCiClient;
+use super::{Error, PullRequestMerger, WorkflowRunner};
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info, warn};
 use std::sync::Arc;
@@ -19,18 +18,14 @@ impl<G> Director<G>
 where
     G: GithubClient + Send + Sync + 'static,
 {
-    pub fn new<C>(
+    pub fn new(
         github: G,
-        circleci: C,
+        workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
         identifier: PullRequestIdentifier,
         merger: PullRequestMerger,
-    ) -> Self
-    where
-        C: CircleCiClient + Send + Sync + 'static,
-    {
+    ) -> Self {
         let github = Arc::new(github);
-        let circleci = Arc::new(circleci);
-        let steps = Self::build_steps(&github, &circleci);
+        let steps = Self::build_steps(&github, workflow_runners);
         Self {
             github,
             identifier,
@@ -39,15 +34,15 @@ where
         }
     }
 
-    fn build_steps<C>(github: &Arc<G>, circleci: &Arc<C>) -> Vec<Box<dyn Step>>
-    where
-        C: CircleCiClient + Send + Sync + 'static,
-    {
+    fn build_steps(
+        github: &Arc<G>,
+        workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
+    ) -> Vec<Box<dyn Step>> {
         vec![
             Box::new(CheckCurrentStateStep::default()),
             Box::new(CheckReviewsStep::new(github.clone())),
             Box::new(CheckBehindMaster::new(github.clone())),
-            Box::new(CheckBuildFailed::new(github.clone(), circleci.clone())),
+            Box::new(CheckBuildFailed::new(github.clone(), workflow_runners)),
         ]
     }
 

@@ -1,24 +1,46 @@
-use std::collections::HashSet;
-
 use super::CircleCiClient;
 use crate::processing::Error;
+use crate::processing::WorkflowRunner;
+use async_trait::async_trait;
 use log::info;
 use reqwest::Url;
+use std::collections::HashSet;
 use std::sync::Arc;
 
-pub struct WorkflowRunner<C> {
+pub struct CircleCiWorkflowRunner<C> {
     client: Arc<C>,
 }
 
-impl<C: CircleCiClient> WorkflowRunner<C> {
+impl<C: CircleCiClient> CircleCiWorkflowRunner<C> {
     pub fn new(client: Arc<C>) -> Self {
         Self { client }
     }
 
-    pub async fn process_failed_jobs(
-        &self,
-        job_urls: impl Iterator<Item = &Url>,
-    ) -> Result<(), Error> {
+    fn parse_job_url(url: &Url) -> Result<JobUrl, Error> {
+        if url.domain() != Some("circleci.com") {
+            return Ok(JobUrl::Unrelated);
+        }
+        let segments: Vec<_> = url
+            .path_segments()
+            .ok_or_else(|| Error::Generic("invalid URL".into()))?
+            .collect();
+        if segments.len() != 4 {
+            return Err(Error::Generic("invalid URL".into()));
+        }
+        let job_id = segments[3]
+            .parse()
+            .map_err(|_| Error::Generic("invalid job id".into()))?;
+        Ok(JobUrl::Job {
+            owner: segments[1],
+            repo: segments[2],
+            job_id,
+        })
+    }
+}
+
+#[async_trait]
+impl<C: CircleCiClient + Send + Sync> WorkflowRunner for CircleCiWorkflowRunner<C> {
+    async fn process_failed_jobs(&self, job_urls: &[Url]) -> Result<(), Error> {
         let mut failed_workflow_ids = HashSet::new();
         for job_url in job_urls {
             let (owner, repo, job_id) = match Self::parse_job_url(job_url)? {
@@ -43,27 +65,6 @@ impl<C: CircleCiClient> WorkflowRunner<C> {
             self.client.rerun_workflow(&workflow_id).await?;
         }
         Ok(())
-    }
-
-    fn parse_job_url(url: &Url) -> Result<JobUrl, Error> {
-        if url.domain() != Some("circleci.com") {
-            return Ok(JobUrl::Unrelated);
-        }
-        let segments: Vec<_> = url
-            .path_segments()
-            .ok_or_else(|| Error::Generic("invalid URL".into()))?
-            .collect();
-        if segments.len() != 4 {
-            return Err(Error::Generic("invalid URL".into()));
-        }
-        let job_id = segments[3]
-            .parse()
-            .map_err(|_| Error::Generic("invalid job id".into()))?;
-        Ok(JobUrl::Job {
-            owner: segments[1],
-            repo: segments[2],
-            job_id,
-        })
     }
 }
 

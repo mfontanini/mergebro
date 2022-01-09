@@ -4,3 +4,4 @@ pub mod workflows;
 
 pub use client::*;
 pub use models::*;
+pub use workflows::CircleCiWorkflowRunner;

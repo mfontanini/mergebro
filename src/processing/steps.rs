@@ -1,5 +1,4 @@
-use super::Error;
-use crate::circleci::{workflows::WorkflowRunner, CircleCiClient};
+use super::{Error, WorkflowRunner};
 use crate::github::{
     Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
     PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
@@ -184,17 +183,16 @@ impl<G> fmt::Display for CheckBehindMaster<G> {
 }
 
 /// Checks whether the build for a pull request failed, re-triggering CI runs if needed
-pub struct CheckBuildFailed<G, C> {
+pub struct CheckBuildFailed<G> {
     github: Arc<G>,
-    circleci_runner: WorkflowRunner<C>,
+    workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
 }
 
-impl<G: GithubClient, C: CircleCiClient> CheckBuildFailed<G, C> {
-    pub fn new(github: Arc<G>, circleci: Arc<C>) -> Self {
-        let circleci_runner = WorkflowRunner::new(circleci);
+impl<G: GithubClient> CheckBuildFailed<G> {
+    pub fn new(github: Arc<G>, workflow_runners: Vec<Arc<dyn WorkflowRunner>>) -> Self {
         Self {
             github,
-            circleci_runner,
+            workflow_runners,
         }
     }
 
@@ -226,32 +224,33 @@ impl<G: GithubClient, C: CircleCiClient> CheckBuildFailed<G, C> {
 
     async fn check_statuses(&self, context: &Context) -> Result<StepStatus, Error> {
         let summaries = self.fetch_status_summaries(context).await?;
-        match summaries.pending_statuses.len() {
-            0 => {
-                if summaries.failed_statuses.is_empty() {
-                    return Ok(StepStatus::Passed);
-                }
-                info!(
-                    "Processing {} failed external jobs",
-                    summaries.failed_statuses.len()
-                );
-                let failed_job_urls = summaries.failed_statuses.iter().map(|summary| &summary.url);
-                self.circleci_runner
-                    .process_failed_jobs(failed_job_urls)
-                    .await?;
+        let pending_count = summaries.pending_statuses.len();
+        if pending_count == 0 {
+            if summaries.failed_statuses.is_empty() {
+                return Ok(StepStatus::Passed);
             }
-            1 => {
-                info!(
-                    "Waiting for external job '{}' to finish running",
-                    summaries.pending_statuses[0].name
-                );
+            info!(
+                "Processing {} failed external jobs",
+                summaries.failed_statuses.len()
+            );
+            let failed_job_urls: Vec<_> = summaries
+                .failed_statuses
+                .into_iter()
+                .map(|summary| summary.url)
+                .collect();
+            for runner in &self.workflow_runners {
+                runner.process_failed_jobs(&failed_job_urls).await?;
             }
-            _ => {
-                info!(
-                    "Waiting for {} external jobs to finish running",
-                    summaries.pending_statuses.len()
-                );
-            }
+        } else if pending_count == 1 {
+            info!(
+                "Waiting for external job '{}' to finish running",
+                summaries.pending_statuses[0].name
+            );
+        } else {
+            info!(
+                "Waiting for {} external jobs to finish running",
+                summaries.pending_statuses.len()
+            );
         };
         Ok(StepStatus::Waiting)
     }
@@ -303,10 +302,9 @@ struct StatusSummaries {
 }
 
 #[async_trait]
-impl<G, C> Step for CheckBuildFailed<G, C>
+impl<G> Step for CheckBuildFailed<G>
 where
     G: GithubClient + Send + Sync,
-    C: CircleCiClient + Send + Sync,
 {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
         // TODO: consider restricting this more
@@ -328,7 +326,7 @@ where
     }
 }
 
-impl<G, C> fmt::Display for CheckBuildFailed<G, C> {
+impl<G> fmt::Display for CheckBuildFailed<G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check if CI builds failed")
     }

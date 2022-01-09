@@ -9,13 +9,25 @@ use reqwest::Url;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
+use structopt::StructOpt;
 use tokio::time::sleep;
+
+#[derive(StructOpt, Debug)]
+#[structopt(name = "mergebro")]
+struct Options {
+    #[structopt(short, long, default_value = "~/.mergebro/config.yaml")]
+    config_file: String,
+
+    #[structopt(name = "pull_request_url")]
+    pull_request_url: String,
+}
 
 #[tokio::main]
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    let config = match MergebroConfig::new("~/.mergebro/config.yaml") {
+    let options = Options::from_args();
+    let config = match MergebroConfig::new(&options.config_file) {
         Ok(config) => config,
         Err(e) => {
             error!("Error parsing config: {}", e);
@@ -23,8 +35,8 @@ async fn main() {
         }
     };
 
-    let github_client = DefaultGithubClient::new(config.github.username, config.github.token);
-    let url = Url::parse(&std::env::args().nth(1).expect("Missing PR")).expect("invalid url");
+    let github_client = DefaultGithubClient::new(&config.github.username, config.github.token);
+    let url = Url::parse(&options.pull_request_url).expect("invalid url");
     let identifier = PullRequestIdentifier::from_app_url(&url).unwrap();
 
     let mut workflow_runners: Vec<Arc<dyn WorkflowRunner>> = Vec::new();
@@ -35,12 +47,22 @@ async fn main() {
         workflow_runners.push(Arc::new(CircleCiWorkflowRunner::new(circleci_client)));
     }
 
+    if workflow_runners.is_empty() {
+        info!("No external workflow runners configured");
+    } else {
+        info!("Using {} external workflow runners", workflow_runners.len());
+    }
+
     // TODO: configurable
     let merger = PullRequestMerger::new(MergeConfig {
         default_merge_method: MergeMethod::Squash,
     });
     let sleep_duration = Duration::from_secs(30);
 
+    info!(
+        "Starting loop on pull request: {}/{}/pulls/{} using github user {}",
+        identifier.owner, identifier.repo, identifier.pull_number, config.github.username
+    );
     let mut director = Director::new(github_client, workflow_runners, identifier, merger);
     loop {
         info!("Running checks on pull request...");

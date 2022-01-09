@@ -8,13 +8,14 @@ async-trait = "^0.1"
 backoff = "^0.4"
 chrono = { version = "^0.4", features = ["serde"] }
 config = { version = "^0.11", default-features = false, features = ["yaml"] }
+env_logger = "^0.9"
 log = "^0.4"
 regex = "^1.5"
 reqwest = { version = "^0.11", features = ["json"] }
-env_logger = "^0.9"
 serde = "^1.0"
 serde_derive = "^1.0"
 serde_json = "^1.0"
+shellexpand = "^2.1"
+structopt = "^0.3"
 thiserror = "^1.0"
 tokio = { version = "1.0", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
-shellexpand = "^2.1"

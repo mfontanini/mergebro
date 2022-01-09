@@ -3,10 +3,10 @@ use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
     github::{DefaultGithubClient, MergeMethod, PullRequestIdentifier},
-    Director, DirectorState, MergeConfig, PullRequestMerger, WorkflowRunner,
+    Director, DirectorState, MergeConfig, MergebroConfig, PullRequestMerger, WorkflowRunner,
 };
 use reqwest::Url;
-use std::env;
+use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -15,19 +15,25 @@ use tokio::time::sleep;
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    // TODO: parametrize
-    let github_user = env::var("GITHUB_API_USER").unwrap();
-    let github_token = env::var("GITHUB_API_TOKEN").unwrap();
-    let circleci_token = env::var("CIRCLECI_API_TOKEN").unwrap();
+    let config = match MergebroConfig::new("~/.mergebro/config.yaml") {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Error parsing config: {}", e);
+            exit(1);
+        }
+    };
 
-    let github_client = DefaultGithubClient::new(github_user, github_token);
-    let circleci_client = DefaultCircleCiClient::new(circleci_token);
+    let github_client = DefaultGithubClient::new(config.github.username, config.github.token);
     let url = Url::parse(&std::env::args().nth(1).expect("Missing PR")).expect("invalid url");
     let identifier = PullRequestIdentifier::from_app_url(&url).unwrap();
 
-    let workflow_runners: Vec<Arc<dyn WorkflowRunner>> = vec![Arc::new(
-        CircleCiWorkflowRunner::new(circleci_client.into()),
-    )];
+    let mut workflow_runners: Vec<Arc<dyn WorkflowRunner>> = Vec::new();
+    if config.workflows.circleci.is_some() {
+        let circleci_client = Arc::new(DefaultCircleCiClient::new(
+            config.workflows.circleci.unwrap().token,
+        ));
+        workflow_runners.push(Arc::new(CircleCiWorkflowRunner::new(circleci_client)));
+    }
 
     // TODO: configurable
     let merger = PullRequestMerger::new(MergeConfig {

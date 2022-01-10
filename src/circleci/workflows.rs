@@ -1,6 +1,6 @@
 use super::CircleCiClient;
 use crate::processing::Error;
-use crate::processing::WorkflowRunner;
+use crate::processing::{WorkflowRunner, WorkflowStatus};
 use async_trait::async_trait;
 use log::info;
 use reqwest::Url;
@@ -40,7 +40,7 @@ impl<C: CircleCiClient> CircleCiWorkflowRunner<C> {
 
 #[async_trait]
 impl<C: CircleCiClient + Send + Sync> WorkflowRunner for CircleCiWorkflowRunner<C> {
-    async fn process_failed_jobs(&self, job_urls: &[Url]) -> Result<(), Error> {
+    async fn process_failed_jobs(&self, job_urls: &[Url]) -> Result<WorkflowStatus, Error> {
         let mut failed_workflow_ids = HashSet::new();
         for job_url in job_urls {
             let (owner, repo, job_id) = match Self::parse_job_url(job_url)? {
@@ -55,7 +55,7 @@ impl<C: CircleCiClient + Send + Sync> WorkflowRunner for CircleCiWorkflowRunner<
             failed_workflow_ids.insert(job_info.latest_workflow.id);
         }
         if failed_workflow_ids.is_empty() {
-            return Ok(());
+            return Ok(WorkflowStatus::Success);
         }
         info!(
             "Re-running {} failed circleci workflows",
@@ -64,7 +64,7 @@ impl<C: CircleCiClient + Send + Sync> WorkflowRunner for CircleCiWorkflowRunner<
         for workflow_id in failed_workflow_ids {
             self.client.rerun_workflow(&workflow_id).await?;
         }
-        Ok(())
+        Ok(WorkflowStatus::Triggered)
     }
 }
 

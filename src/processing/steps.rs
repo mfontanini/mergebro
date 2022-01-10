@@ -1,4 +1,4 @@
-use super::{Error, WorkflowRunner};
+use super::{Error, WorkflowRunner, WorkflowStatus};
 use crate::github::{
     Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
     PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
@@ -229,8 +229,19 @@ impl<G: GithubClient> CheckBuildFailed<G> {
                 .into_iter()
                 .map(|summary| summary.url)
                 .collect();
+            let mut total_triggered = 0;
             for runner in &self.workflow_runners {
-                runner.process_failed_jobs(&failed_job_urls).await?;
+                if runner.process_failed_jobs(&failed_job_urls).await? == WorkflowStatus::Triggered
+                {
+                    total_triggered += 1;
+                }
+            }
+            if total_triggered == 0 {
+                // There's failed jobs but we don't know how to re-trigger them. e.g. we don't support
+                // whatever service they're being ran on.
+                return Err(Error::Generic(
+                    "failed jobs belong to unknown external services".into(),
+                ));
             }
         } else if pending_count == 1 {
             info!(

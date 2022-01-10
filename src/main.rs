@@ -66,7 +66,7 @@ async fn main() {
     loop {
         info!("Running checks on pull request...");
         match director.run().await {
-            Ok(DirectorState::Pending) => {
+            Ok(DirectorState::Waiting) => {
                 info!("Sleeping for {} seconds", sleep_duration.as_secs());
                 sleep(sleep_duration).await;
             }

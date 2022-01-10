@@ -53,7 +53,7 @@ where
             match step_status {
                 StepStatus::Waiting => {
                     info!("Step '{}' is pending", step);
-                    return Ok(DirectorState::Pending);
+                    return Ok(DirectorState::Waiting);
                 }
                 StepStatus::Passed => debug!("Step '{}' passed", step),
             };
@@ -76,5 +76,5 @@ where
 #[derive(Debug, PartialEq, Clone)]
 pub enum DirectorState {
     Done,
-    Pending,
+    Waiting,
 }

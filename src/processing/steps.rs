@@ -33,7 +33,6 @@ impl Context {
 
 #[derive(PartialEq, Debug, Clone, Hash)]
 pub enum StepStatus {
-    CannotProceed { reason: String },
     Passed,
     Waiting,
 }
@@ -48,25 +47,17 @@ impl Step for CheckCurrentStateStep {
         match context.pull_request.state {
             PullRequestState::Open => {
                 if context.pull_request.draft {
-                    Ok(StepStatus::CannotProceed {
-                        reason: "pull request is a draft".into(),
-                    })
+                    Err(Error::Generic("pull request is a draft".into()))
                 } else if matches!(context.pull_request.mergeable_state, MergeableState::Dirty) {
-                    Ok(StepStatus::CannotProceed {
-                        reason: "pull request has conflicts".into(),
-                    })
+                    Err(Error::Generic("pull request has conflicts".into()))
                 } else {
                     Ok(StepStatus::Passed)
                 }
             }
             PullRequestState::Closed if context.pull_request.merged => {
-                Ok(StepStatus::CannotProceed {
-                    reason: "pull request is already merged".into(),
-                })
+                Err(Error::Generic("pull request is already merged".into()))
             }
-            PullRequestState::Closed => Ok(StepStatus::CannotProceed {
-                reason: "pull request is closed".into(),
-            }),
+            PullRequestState::Closed => Err(Error::Generic("pull request is closed".into())),
             PullRequestState::Unknown => Err(Error::UnsupportedPullRequestState(
                 "pull request state is unknown".into(),
             )),
@@ -132,9 +123,9 @@ impl<G: GithubClient + Send + Sync> Step for CheckReviewsStep<G> {
                 "not enough approvals (need {}, have {})",
                 approvals_needed, total_users_approved
             );
-            return Ok(StepStatus::CannotProceed { reason });
+            Err(Error::Generic(reason))
         } else {
-            return Ok(StepStatus::Passed);
+            Ok(StepStatus::Passed)
         }
     }
 }

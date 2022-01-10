@@ -4,7 +4,7 @@ use super::steps::{
 };
 use super::{Error, PullRequestMerger, WorkflowRunner};
 use crate::github::{GithubClient, PullRequestIdentifier};
-use log::{debug, info, warn};
+use log::{debug, info};
 use std::sync::Arc;
 
 pub struct Director<G> {
@@ -51,10 +51,6 @@ where
         for step in &mut self.steps {
             let step_status = step.execute(&context).await?;
             match step_status {
-                StepStatus::CannotProceed { reason } => {
-                    warn!("Cannot proceed: {}", reason);
-                    return Ok(DirectorState::Done);
-                }
                 StepStatus::Waiting => {
                     info!("Step '{}' is pending", step);
                     return Ok(DirectorState::Pending);

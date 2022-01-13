@@ -4,7 +4,7 @@ use crate::github::{
     PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
 };
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
 use reqwest::Url;
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -205,7 +205,7 @@ impl<G: GithubClient> CheckBuildFailed<G> {
             return Ok(StepStatus::Passed);
         }
         for run in failed_workflows {
-            info!("Actions workflow '{}' failed, re-running it", run.name);
+            warn!("Actions workflow '{}' failed, re-running it", run.name);
             self.github
                 .rerun_workflow(&context.pull_request.base.repo, run.id)
                 .await?;
@@ -220,7 +220,7 @@ impl<G: GithubClient> CheckBuildFailed<G> {
             if summaries.failed_statuses.is_empty() {
                 return Ok(StepStatus::Passed);
             }
-            info!(
+            warn!(
                 "Processing {} failed external jobs",
                 summaries.failed_statuses.len()
             );

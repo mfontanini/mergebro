@@ -109,6 +109,10 @@ impl Error {
     pub fn method_not_allowed(&self) -> bool {
         matches!(self, Self::Http(StatusCode::METHOD_NOT_ALLOWED))
     }
+
+    pub fn too_many_requests(&self) -> bool {
+        matches!(self, Self::Http(StatusCode::TOO_MANY_REQUESTS))
+    }
 }
 
 async fn retry_request_if_needed<F, R, O>(requestor: F) -> Result<O>
@@ -121,7 +125,7 @@ where
     let mut backoff = ExponentialBackoff::default();
     loop {
         match requestor().await {
-            Err(Error::Http(status)) if status == StatusCode::TOO_MANY_REQUESTS => {
+            Err(e) if e.too_many_requests() => {
                 let delay = backoff.next_backoff();
                 match delay {
                     Some(delay) => {
@@ -131,7 +135,7 @@ where
                     None => return Err(Error::RateLimitRetries),
                 }
             }
-            e => return e,
+            other => return other,
         }
     }
 }

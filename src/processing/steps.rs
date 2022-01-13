@@ -263,13 +263,16 @@ impl<G: GithubClient> CheckBuildFailed<G> {
             .pull_request_statuses(&context.pull_request)
             .await?;
         let mut last_run_per_status = HashMap::new();
+        // Note: there's 0 docs on this so it's unclear but it seems `context` is the thing to group by.
         for status in statuses {
-            let url = Self::parse_status_url(&status.target_url)?;
-            last_run_per_status.entry(url).or_insert(status);
+            last_run_per_status
+                .entry(status.context.clone())
+                .or_insert(status);
         }
         let mut failed_statuses = Vec::new();
         let mut pending_statuses = Vec::new();
-        for (url, status) in last_run_per_status {
+        for (_, status) in last_run_per_status {
+            let url = Self::parse_status_url(&status.target_url)?;
             let summary = StatusSummary {
                 url,
                 name: status.context,

@@ -22,6 +22,12 @@ struct Options {
     pull_request_url: String,
 }
 
+fn parse_pull_request_url(url: &str) -> Result<PullRequestIdentifier, Box<dyn std::error::Error>> {
+    let url = Url::parse(url)?;
+    let pull_request_id = PullRequestIdentifier::from_app_url(&url)?;
+    Ok(pull_request_id)
+}
+
 #[tokio::main]
 async fn main() {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
@@ -36,8 +42,13 @@ async fn main() {
     };
 
     let github_client = DefaultGithubClient::new(&config.github.username, config.github.token);
-    let url = Url::parse(&options.pull_request_url).expect("invalid url");
-    let identifier = PullRequestIdentifier::from_app_url(&url).unwrap();
+    let identifier = match parse_pull_request_url(&options.pull_request_url) {
+        Ok(identifier) => identifier,
+        Err(e) => {
+            error!("Error parsing pull request URL: {}", e);
+            exit(1);
+        }
+    };
 
     let mut workflow_runners: Vec<Arc<dyn WorkflowRunner>> = Vec::new();
     if config.workflows.circleci.is_some() {

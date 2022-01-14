@@ -1,49 +1,33 @@
-use super::steps::{
-    CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Context, Step,
-    StepStatus,
-};
-use super::{Error, PullRequestMerger, WorkflowRunner};
+use super::steps::{Context, Step, StepStatus};
+use super::{Error, PullRequestMerger};
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info};
 use std::sync::Arc;
 
-pub struct Director<G> {
+pub struct Director<G, M> {
     github: Arc<G>,
     identifier: PullRequestIdentifier,
     steps: Vec<Box<dyn Step>>,
-    merger: PullRequestMerger,
+    merger: M,
 }
 
-impl<G> Director<G>
+impl<G, M> Director<G, M>
 where
-    G: GithubClient + Send + Sync + 'static,
+    G: GithubClient,
+    M: PullRequestMerger,
 {
     pub fn new(
-        github: G,
-        workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
+        github: Arc<G>,
+        steps: Vec<Box<dyn Step>>,
         identifier: PullRequestIdentifier,
-        merger: PullRequestMerger,
+        merger: M,
     ) -> Self {
-        let github = Arc::new(github);
-        let steps = Self::build_steps(&github, workflow_runners);
         Self {
             github,
             identifier,
             steps,
             merger,
         }
-    }
-
-    fn build_steps(
-        github: &Arc<G>,
-        workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
-    ) -> Vec<Box<dyn Step>> {
-        vec![
-            Box::new(CheckCurrentStateStep::default()),
-            Box::new(CheckReviewsStep::new(github.clone())),
-            Box::new(CheckBehindMaster::new(github.clone())),
-            Box::new(CheckBuildFailed::new(github.clone(), workflow_runners)),
-        ]
     }
 
     pub async fn run(&mut self) -> Result<DirectorState, Error> {
@@ -58,11 +42,10 @@ where
                 StepStatus::Passed => debug!("Step '{}' passed", step),
             };
         }
-        info!("All checks passed, attempting to merge pull request");
+        info!("All checks passed, pull request is ready to be merged!");
         self.merger
             .merge(&context.identifier, &context.pull_request, &*self.github)
             .await?;
-        info!("Pull request merged ✔️");
         Ok(DirectorState::Done)
     }
 

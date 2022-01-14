@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use serde_derive::Serialize;
 
 #[async_trait]
-pub trait GithubClient {
+pub trait GithubClient: Send + Sync {
     async fn pull_request_info(&self, id: &PullRequestIdentifier) -> Result<PullRequest>;
     async fn pull_request_reviews(
         &self,

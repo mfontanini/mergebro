@@ -3,7 +3,10 @@ use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
     github::{DefaultGithubClient, PullRequestIdentifier},
-    Director, DirectorState, MergeConfig, MergebroConfig, PullRequestMerger, WorkflowRunner,
+    processing::steps::{
+        CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Step,
+    },
+    DefaultPullRequestMerger, Director, DirectorState, MergeConfig, MergebroConfig, WorkflowRunner,
 };
 use reqwest::Url;
 use std::process::exit;
@@ -41,7 +44,10 @@ async fn main() {
         }
     };
 
-    let github_client = DefaultGithubClient::new(&config.github.username, config.github.token);
+    let github_client = Arc::new(DefaultGithubClient::new(
+        &config.github.username,
+        config.github.token,
+    ));
     let identifier = match parse_pull_request_url(&options.pull_request_url) {
         Ok(identifier) => identifier,
         Err(e) => {
@@ -64,7 +70,7 @@ async fn main() {
         info!("Using {} external workflow runners", workflow_runners.len());
     }
 
-    let merger = PullRequestMerger::new(MergeConfig {
+    let merger = DefaultPullRequestMerger::new(MergeConfig {
         default_merge_method: config.merge.default_method,
     });
 
@@ -73,7 +79,16 @@ async fn main() {
         "Starting loop on pull request: {}/{}/pulls/{} using github user {}",
         identifier.owner, identifier.repo, identifier.pull_number, config.github.username
     );
-    let mut director = Director::new(github_client, workflow_runners, identifier, merger);
+    let steps: Vec<Box<dyn Step>> = vec![
+        Box::new(CheckCurrentStateStep::default()),
+        Box::new(CheckReviewsStep::new(github_client.clone())),
+        Box::new(CheckBehindMaster::new(github_client.clone())),
+        Box::new(CheckBuildFailed::new(
+            github_client.clone(),
+            workflow_runners,
+        )),
+    ];
+    let mut director = Director::new(github_client, steps, identifier, merger);
     loop {
         info!("Running checks on pull request...");
         match director.run().await {

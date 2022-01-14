@@ -3,10 +3,13 @@ use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
     github::{DefaultGithubClient, PullRequestIdentifier},
-    processing::steps::{
-        CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Step,
+    processing::{
+        steps::{
+            CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Step,
+        },
+        DefaultPullRequestMerger,
     },
-    DefaultPullRequestMerger, Director, DirectorState, MergeConfig, MergebroConfig, WorkflowRunner,
+    Director, DirectorState, MergeConfig, MergebroConfig, WorkflowRunner,
 };
 use reqwest::Url;
 use std::process::exit;
@@ -70,9 +73,9 @@ async fn main() {
         info!("Using {} external workflow runners", workflow_runners.len());
     }
 
-    let merger = DefaultPullRequestMerger::new(MergeConfig {
+    let merger = Arc::new(DefaultPullRequestMerger::new(MergeConfig {
         default_merge_method: config.merge.default_method,
-    });
+    }));
 
     let sleep_duration = Duration::from_secs(config.poll.delay_seconds as u64);
     info!(
@@ -88,7 +91,7 @@ async fn main() {
             workflow_runners,
         )),
     ];
-    let mut director = Director::new(github_client, steps, identifier, merger);
+    let mut director = Director::new(github_client, merger, steps, identifier);
     loop {
         info!("Running checks on pull request...");
         match director.run().await {

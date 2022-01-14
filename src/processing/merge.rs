@@ -14,11 +14,11 @@ pub struct MergeConfig {
 
 #[async_trait]
 pub trait PullRequestMerger {
-    async fn merge<G: GithubClient>(
+    async fn merge(
         &self,
         id: &PullRequestIdentifier,
         pull_request: &PullRequest,
-        github: &G,
+        github: &dyn GithubClient,
     ) -> Result<(), Error>;
 }
 
@@ -31,11 +31,11 @@ impl DefaultPullRequestMerger {
         Self { config }
     }
 
-    async fn merge_with_method<G: GithubClient>(
+    async fn merge_with_method(
         &self,
         id: &PullRequestIdentifier,
         pull_request: &PullRequest,
-        github: &G,
+        github: &dyn GithubClient,
         method: &MergeMethod,
     ) -> Result<(), crate::client::Error> {
         let commit_message = Self::build_merge_message(pull_request, method);
@@ -71,11 +71,11 @@ impl DefaultPullRequestMerger {
 
 #[async_trait]
 impl PullRequestMerger for DefaultPullRequestMerger {
-    async fn merge<G: GithubClient>(
+    async fn merge(
         &self,
         id: &PullRequestIdentifier,
         pull_request: &PullRequest,
-        github: &G,
+        github: &dyn GithubClient,
     ) -> Result<(), Error> {
         let methods = self.build_methods();
         for method in methods {

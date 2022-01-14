@@ -4,23 +4,19 @@ use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info};
 use std::sync::Arc;
 
-pub struct Director<G, M> {
-    github: Arc<G>,
+pub struct Director {
+    github: Arc<dyn GithubClient>,
     identifier: PullRequestIdentifier,
     steps: Vec<Box<dyn Step>>,
-    merger: M,
+    merger: Arc<dyn PullRequestMerger>,
 }
 
-impl<G, M> Director<G, M>
-where
-    G: GithubClient,
-    M: PullRequestMerger,
-{
+impl Director {
     pub fn new(
-        github: Arc<G>,
+        github: Arc<dyn GithubClient>,
+        merger: Arc<dyn PullRequestMerger>,
         steps: Vec<Box<dyn Step>>,
         identifier: PullRequestIdentifier,
-        merger: M,
     ) -> Self {
         Self {
             github,

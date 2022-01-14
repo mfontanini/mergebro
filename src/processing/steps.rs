@@ -73,12 +73,12 @@ impl fmt::Display for CheckCurrentStateStep {
 
 /// Checks whether a pull request is approved by however many people its branch protection
 /// rules require
-pub struct CheckReviewsStep<G> {
-    github: Arc<G>,
+pub struct CheckReviewsStep {
+    github: Arc<dyn GithubClient>,
 }
 
-impl<G: GithubClient> CheckReviewsStep<G> {
-    pub fn new(github: Arc<G>) -> Self {
+impl CheckReviewsStep {
+    pub fn new(github: Arc<dyn GithubClient>) -> Self {
         Self { github }
     }
 
@@ -104,7 +104,7 @@ impl<G: GithubClient> CheckReviewsStep<G> {
 }
 
 #[async_trait]
-impl<G: GithubClient + Send + Sync> Step for CheckReviewsStep<G> {
+impl Step for CheckReviewsStep {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
         let branch_protection = self
             .fetch_branch_protection(&context.pull_request.base)
@@ -130,25 +130,25 @@ impl<G: GithubClient + Send + Sync> Step for CheckReviewsStep<G> {
     }
 }
 
-impl<G> fmt::Display for CheckReviewsStep<G> {
+impl fmt::Display for CheckReviewsStep {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check reviews")
     }
 }
 
 /// Checks whether a pull request is behind master, and updates it otherwise
-pub struct CheckBehindMaster<G> {
-    github: Arc<G>,
+pub struct CheckBehindMaster {
+    github: Arc<dyn GithubClient>,
 }
 
-impl<G: GithubClient> CheckBehindMaster<G> {
-    pub fn new(github: Arc<G>) -> Self {
+impl CheckBehindMaster {
+    pub fn new(github: Arc<dyn GithubClient>) -> Self {
         Self { github }
     }
 }
 
 #[async_trait]
-impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
+impl Step for CheckBehindMaster {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
         if !matches!(context.pull_request.mergeable_state, MergeableState::Behind) {
             return Ok(StepStatus::Passed);
@@ -167,20 +167,23 @@ impl<G: GithubClient + Send + Sync> Step for CheckBehindMaster<G> {
     }
 }
 
-impl<G> fmt::Display for CheckBehindMaster<G> {
+impl fmt::Display for CheckBehindMaster {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check if behind master")
     }
 }
 
 /// Checks whether the build for a pull request failed, re-triggering CI runs if needed
-pub struct CheckBuildFailed<G> {
-    github: Arc<G>,
+pub struct CheckBuildFailed {
+    github: Arc<dyn GithubClient>,
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
 }
 
-impl<G: GithubClient> CheckBuildFailed<G> {
-    pub fn new(github: Arc<G>, workflow_runners: Vec<Arc<dyn WorkflowRunner>>) -> Self {
+impl CheckBuildFailed {
+    pub fn new(
+        github: Arc<dyn GithubClient>,
+        workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
+    ) -> Self {
         Self {
             github,
             workflow_runners,
@@ -307,10 +310,7 @@ struct StatusSummaries {
 }
 
 #[async_trait]
-impl<G> Step for CheckBuildFailed<G>
-where
-    G: GithubClient + Send + Sync,
-{
+impl Step for CheckBuildFailed {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
         // TODO: consider restricting this more
         if matches!(context.pull_request.mergeable_state, MergeableState::Clean) {
@@ -331,7 +331,7 @@ where
     }
 }
 
-impl<G> fmt::Display for CheckBuildFailed<G> {
+impl fmt::Display for CheckBuildFailed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check if CI builds failed")
     }

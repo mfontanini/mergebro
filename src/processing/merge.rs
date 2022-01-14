@@ -1,3 +1,4 @@
+use crate::config::MergeConfig;
 use crate::github::{
     client::{GithubClient, MergeRequestBody},
     MergeMethod, PullRequest, PullRequestIdentifier,
@@ -5,12 +6,6 @@ use crate::github::{
 use crate::processing::Error;
 use async_trait::async_trait;
 use log::{info, warn};
-use serde_derive::Deserialize;
-
-#[derive(Deserialize, Debug, Clone)]
-pub struct MergeConfig {
-    pub default_merge_method: MergeMethod,
-}
 
 #[async_trait]
 pub trait PullRequestMerger {
@@ -59,11 +54,11 @@ impl DefaultPullRequestMerger {
 
     fn build_methods(&self) -> Vec<MergeMethod> {
         let all_methods = [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase];
-        let mut methods = vec![self.config.default_merge_method.clone()];
+        let mut methods = vec![self.config.default_method.clone()];
         methods.extend(
             all_methods
                 .into_iter()
-                .filter(|method| *method != self.config.default_merge_method),
+                .filter(|method| *method != self.config.default_method),
         );
         methods
     }

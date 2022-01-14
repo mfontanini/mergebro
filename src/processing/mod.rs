@@ -6,5 +6,5 @@ pub mod steps;
 
 pub use director::{Director, DirectorState};
 pub use error::Error;
-pub use merge::{DefaultPullRequestMerger, DummyPullRequestMerger, MergeConfig, PullRequestMerger};
+pub use merge::{DefaultPullRequestMerger, DummyPullRequestMerger, PullRequestMerger};
 pub use runner::{WorkflowRunner, WorkflowStatus};

@@ -9,7 +9,7 @@ use mergebro::{
         },
         DefaultPullRequestMerger, DummyPullRequestMerger, PullRequestMerger,
     },
-    Director, DirectorState, MergeConfig, MergebroConfig, WorkflowRunner,
+    Director, DirectorState, MergebroConfig, WorkflowRunner,
 };
 use reqwest::Url;
 use std::process::exit;
@@ -77,12 +77,11 @@ async fn main() {
         info!("Using {} external workflow runners", workflow_runners.len());
     }
 
-    let merger: Arc<dyn PullRequestMerger> = if !options.dry_run {
-        Arc::new(DefaultPullRequestMerger::new(MergeConfig {
-            default_merge_method: config.merge.default_method,
-        }))
-    } else {
+    let merger: Arc<dyn PullRequestMerger> = if options.dry_run {
+        info!("Running in dry-run mode");
         Arc::new(DummyPullRequestMerger::default())
+    } else {
+        Arc::new(DefaultPullRequestMerger::new(config.merge))
     };
 
     let sleep_duration = Duration::from_secs(config.poll.delay_seconds as u64);

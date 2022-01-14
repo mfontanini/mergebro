@@ -101,3 +101,19 @@ impl PullRequestMerger for DefaultPullRequestMerger {
         Err(Error::Generic("No merge method allowed".into()))
     }
 }
+
+#[derive(Default)]
+pub struct DummyPullRequestMerger;
+
+#[async_trait]
+impl PullRequestMerger for DummyPullRequestMerger {
+    async fn merge(
+        &self,
+        _id: &PullRequestIdentifier,
+        _pull_request: &PullRequest,
+        _github: &dyn GithubClient,
+    ) -> Result<(), crate::processing::Error> {
+        info!("Skipping pull request merge step");
+        Ok(())
+    }
+}

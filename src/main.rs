@@ -7,7 +7,7 @@ use mergebro::{
         steps::{
             CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Step,
         },
-        DefaultPullRequestMerger,
+        DefaultPullRequestMerger, DummyPullRequestMerger, PullRequestMerger,
     },
     Director, DirectorState, MergeConfig, MergebroConfig, WorkflowRunner,
 };
@@ -23,6 +23,10 @@ use tokio::time::sleep;
 struct Options {
     #[structopt(short, long, default_value = "~/.mergebro/config.yaml")]
     config_file: String,
+
+    /// Whether to simply run checks but not actually merge the pull request
+    #[structopt(short, long)]
+    dry_run: bool,
 
     #[structopt(name = "pull_request_url")]
     pull_request_url: String,
@@ -73,9 +77,13 @@ async fn main() {
         info!("Using {} external workflow runners", workflow_runners.len());
     }
 
-    let merger = Arc::new(DefaultPullRequestMerger::new(MergeConfig {
-        default_merge_method: config.merge.default_method,
-    }));
+    let merger: Arc<dyn PullRequestMerger> = if !options.dry_run {
+        Arc::new(DefaultPullRequestMerger::new(MergeConfig {
+            default_merge_method: config.merge.default_method,
+        }))
+    } else {
+        Arc::new(DummyPullRequestMerger::default())
+    };
 
     let sleep_duration = Duration::from_secs(config.poll.delay_seconds as u64);
     info!(

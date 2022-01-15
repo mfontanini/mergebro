@@ -18,12 +18,13 @@ pub trait PullRequestMerger {
 }
 
 pub struct DefaultPullRequestMerger {
-    config: MergeConfig,
+    merge_methods: Vec<MergeMethod>,
 }
 
 impl DefaultPullRequestMerger {
     pub fn new(config: MergeConfig) -> Self {
-        Self { config }
+        let merge_methods = Self::build_merge_methods(config.default_method);
+        Self { merge_methods }
     }
 
     async fn merge_with_method(
@@ -52,14 +53,13 @@ impl DefaultPullRequestMerger {
         }
     }
 
-    fn build_methods(&self) -> Vec<MergeMethod> {
-        let all_methods = [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase];
-        let mut methods = vec![self.config.default_method.clone()];
-        methods.extend(
-            all_methods
-                .into_iter()
-                .filter(|method| *method != self.config.default_method),
-        );
+    fn build_merge_methods(default_method: MergeMethod) -> Vec<MergeMethod> {
+        let mut methods = vec![MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase];
+        let default_index = methods
+            .iter()
+            .position(|element| element == &default_method)
+            .unwrap();
+        methods.swap(default_index, 0);
         methods
     }
 }
@@ -72,14 +72,13 @@ impl PullRequestMerger for DefaultPullRequestMerger {
         pull_request: &PullRequest,
         github: &dyn GithubClient,
     ) -> Result<(), Error> {
-        let methods = self.build_methods();
-        for method in methods {
+        for method in &self.merge_methods {
             info!(
                 "Attempting to merge pull request using '{:?}' merge method",
                 method
             );
             match self
-                .merge_with_method(id, pull_request, github, &method)
+                .merge_with_method(id, pull_request, github, method)
                 .await
             {
                 Ok(_) => {
@@ -110,5 +109,23 @@ impl PullRequestMerger for DummyPullRequestMerger {
     ) -> Result<(), crate::processing::Error> {
         info!("Skipping pull request merge step");
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    fn test_build_merge_methods(
+        #[values(MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase)] method: MergeMethod,
+    ) {
+        let methods = DefaultPullRequestMerger::build_merge_methods(method.clone());
+        assert_eq!(methods.len(), 3);
+        assert_eq!(methods[0], method);
+        for method in [MergeMethod::Squash, MergeMethod::Merge, MergeMethod::Rebase] {
+            assert!(methods.iter().position(|m| m == &method).is_some());
+        }
     }
 }

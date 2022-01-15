@@ -19,3 +19,6 @@ shellexpand = "^2.1"
 structopt = "^0.3"
 thiserror = "^1.0"
 tokio = { version = "1.0", default-features = false, features = ["macros", "rt-multi-thread", "time"] }
+
+[dev-dependencies]
+rstest = "^0.12"

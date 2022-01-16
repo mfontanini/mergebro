@@ -352,8 +352,10 @@ struct StatusSummaries {
 #[async_trait]
 impl Step for CheckBuildFailed {
     async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        // TODO: consider restricting this more
-        if matches!(context.pull_request.mergeable_state, MergeableState::Clean) {
+        if !matches!(
+            context.pull_request.mergeable_state,
+            MergeableState::Blocked
+        ) {
             return Ok(StepStatus::Passed);
         }
         let statuses_result = self.check_statuses(context).await?;

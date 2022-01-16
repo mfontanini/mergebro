@@ -191,8 +191,7 @@ impl CheckBuildFailed {
     }
 
     async fn check_actions(&self, context: &Context) -> Result<StepStatus, Error> {
-        // TODO: make sure head vs base is right here for forks
-        let action_runs = self.github.action_runs(&context.pull_request.head).await?;
+        let action_runs = self.github.action_runs(&context.pull_request).await?;
         let mut last_run_per_workflow = HashMap::new();
         for run in action_runs.workflow_runs {
             if run.head_sha != context.pull_request.head.sha {

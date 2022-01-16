@@ -17,7 +17,7 @@ pub trait GithubClient: Send + Sync {
     async fn pull_request_statuses(&self, pull_request: &PullRequest) -> Result<Vec<Status>>;
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection>;
     async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody>;
-    async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns>;
+    async fn action_runs(&self, pull_request: &PullRequest) -> Result<ActionRuns>;
     async fn rerun_workflow(&self, repo: &Repository, run_id: u64) -> Result<NoBody>;
     async fn merge_pull_request(
         &self,
@@ -98,13 +98,14 @@ impl GithubClient for DefaultGithubClient {
         self.client.put(&url, &body).await
     }
 
-    async fn action_runs(&self, branch: &Branch) -> Result<ActionRuns> {
+    async fn action_runs(&self, pull_request: &PullRequest) -> Result<ActionRuns> {
         let url = format!(
-            "{}/repos/{}/{}/actions/runs?branch={}",
+            "{}/repos/{}/{}/actions/runs?branch={}&actor={}",
             Self::API_BASE,
-            branch.repo.owner.login,
-            branch.repo.name,
-            branch.name,
+            pull_request.base.repo.owner.login,
+            pull_request.base.repo.name,
+            pull_request.head.name,
+            pull_request.head.repo.owner.login
         );
         self.client.get(&url).await
     }

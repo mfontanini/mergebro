@@ -14,6 +14,9 @@ pub struct MergebroConfig {
 
     #[serde(default)]
     pub workflows: WorkflowsConfig,
+
+    #[serde(default)]
+    pub reviews: PullRequestReviewsConfig,
 }
 
 #[derive(Deserialize, Debug)]
@@ -54,6 +57,36 @@ pub struct WorkflowsConfig {
 #[derive(Deserialize, Debug)]
 pub struct CircleCiConfig {
     pub token: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct PullRequestReviewsConfig {
+    pub default: ReviewsConfig,
+
+    #[serde(default)]
+    pub repos: Vec<RepoReviewsConfig>,
+}
+
+impl Default for PullRequestReviewsConfig {
+    fn default() -> Self {
+        Self {
+            default: ReviewsConfig { approvals: 1 },
+            repos: Vec::new(),
+        }
+    }
+}
+
+#[derive(Deserialize, Debug)]
+pub struct RepoReviewsConfig {
+    pub repo: String,
+
+    #[serde(flatten)]
+    pub config: ReviewsConfig,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct ReviewsConfig {
+    pub approvals: u32,
 }
 
 impl MergebroConfig {

@@ -18,3 +18,17 @@ workflows:
 # we will try the default method but otherwise attempt the other 2 if the default one failed.
 merge:
   default_method: squash
+
+
+# The pull request reviews configuration. mergebro will fetch and honor the branch protection settings from the
+# target branch. However, this is not available in repos you don't own so you can provide some default and
+# per repo settings to make sure there's enough approvals before attempting to merge a change.
+reviews:
+  default:
+    # By default require at least 2 approvals on all pull requests
+    approvals: 2
+
+  repos:
+    # Specify higher required approvals for this one repo
+    - repo: mfontanini/mergebro
+      approvals: 3

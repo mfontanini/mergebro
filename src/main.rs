@@ -89,9 +89,16 @@ async fn main() {
         "Starting loop on pull request: {}/{}/pulls/{} using github user {}",
         identifier.owner, identifier.repo, identifier.pull_number, config.github.username
     );
+    let check_reviews = match CheckReviewsStep::new(github_client.clone(), config.reviews) {
+        Ok(step) => step,
+        Err(e) => {
+            error!("Failed to initialize check reviews step: {}", e);
+            exit(1);
+        }
+    };
     let steps: Vec<Box<dyn Step>> = vec![
         Box::new(CheckCurrentStateStep::default()),
-        Box::new(CheckReviewsStep::new(github_client.clone())),
+        Box::new(check_reviews),
         Box::new(CheckBehindMaster::new(github_client.clone())),
         Box::new(CheckBuildFailed::new(
             github_client.clone(),

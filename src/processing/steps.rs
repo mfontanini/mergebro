@@ -1,4 +1,5 @@
 use super::{Error, WorkflowRunner, WorkflowStatus};
+use crate::config::{PullRequestReviewsConfig, ReviewsConfig};
 use crate::github::{
     Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
     PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
@@ -75,18 +76,44 @@ impl fmt::Display for CheckCurrentStateStep {
 /// rules require
 pub struct CheckReviewsStep {
     github: Arc<dyn GithubClient>,
+    default_config: ReviewsConfig,
+    repo_configs: HashMap<String, ReviewsConfig>,
 }
 
 impl CheckReviewsStep {
-    pub fn new(github: Arc<dyn GithubClient>) -> Self {
-        Self { github }
+    pub fn new(
+        github: Arc<dyn GithubClient>,
+        config: PullRequestReviewsConfig,
+    ) -> Result<Self, Error> {
+        let default_config = config.default;
+        let mut repo_configs = HashMap::new();
+        use std::collections::hash_map::Entry;
+        for config in config.repos {
+            match repo_configs.entry(config.repo) {
+                Entry::Occupied(entry) => {
+                    return Err(Error::Generic(format!(
+                        "duplicate review config for repo {}",
+                        entry.key()
+                    )))
+                }
+                Entry::Vacant(entry) => entry.insert(config.config),
+            };
+        }
+        Ok(Self {
+            github,
+            default_config,
+            repo_configs,
+        })
     }
 
-    async fn fetch_branch_protection(&self, branch: &Branch) -> Result<BranchProtection, Error> {
+    async fn fetch_branch_protection(
+        &self,
+        branch: &Branch,
+    ) -> Result<Option<BranchProtection>, Error> {
         let branch_protection = self.github.branch_protection(branch).await;
         match branch_protection {
-            Ok(branch_protection) => Ok(branch_protection),
-            Err(e) if e.not_found() => Ok(BranchProtection::default()),
+            Ok(branch_protection) => Ok(Some(branch_protection)),
+            Err(e) if e.not_found() => Ok(None),
             Err(e) => Err(e.into()),
         }
     }
@@ -101,6 +128,22 @@ impl CheckReviewsStep {
         }
         users_approved.len()
     }
+
+    fn required_approvals(
+        &self,
+        branch_protection: Option<BranchProtection>,
+        context: &Context,
+    ) -> u32 {
+        let repo = format!("{}/{}", context.identifier.owner, context.identifier.repo);
+        let configured_approvals = match self.repo_configs.get(&repo) {
+            Some(config) => config.approvals,
+            None => self.default_config.approvals,
+        };
+        match branch_protection {
+            Some(protection) => protection.reviews.approvals.max(configured_approvals),
+            None => configured_approvals,
+        }
+    }
 }
 
 #[async_trait]
@@ -109,9 +152,7 @@ impl Step for CheckReviewsStep {
         let branch_protection = self
             .fetch_branch_protection(&context.pull_request.base)
             .await?;
-        // TODO: make this minimum configurable and possibly only fall back if we get 404 on
-        // the branch protection endpoint
-        let approvals_needed = (branch_protection.reviews.approvals as usize).min(1);
+        let approvals_needed = self.required_approvals(branch_protection, context) as usize;
         let reviews = self
             .github
             .pull_request_reviews(&context.identifier)

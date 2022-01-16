@@ -2,7 +2,8 @@ use env_logger::Env;
 use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
-    github::{DefaultGithubClient, PullRequestIdentifier},
+    config::PullRequestReviewsConfig,
+    github::{DefaultGithubClient, GithubClient, PullRequestIdentifier},
     processing::{
         steps::{
             CheckBehindMaster, CheckBuildFailed, CheckCurrentStateStep, CheckReviewsStep, Step,
@@ -28,6 +29,10 @@ struct Options {
     #[structopt(short, long)]
     dry_run: bool,
 
+    /// Whether to ignore checks for pull request reviews
+    #[structopt(short = "r")]
+    ignore_reviews: bool,
+
     #[structopt(name = "pull_request_url")]
     pull_request_url: String,
 }
@@ -36,6 +41,31 @@ fn parse_pull_request_url(url: &str) -> Result<PullRequestIdentifier, Box<dyn st
     let url = Url::parse(url)?;
     let pull_request_id = PullRequestIdentifier::from_app_url(&url)?;
     Ok(pull_request_id)
+}
+
+fn build_steps(
+    github_client: Arc<dyn GithubClient>,
+    workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
+    reviews_config: PullRequestReviewsConfig,
+    ignore_reviews: bool,
+) -> Vec<Box<dyn Step>> {
+    let mut steps: Vec<Box<dyn Step>> = vec![];
+    steps.push(Box::new(CheckCurrentStateStep::default()));
+    steps.push(Box::new(CheckBehindMaster::new(github_client.clone())));
+    steps.push(Box::new(CheckBuildFailed::new(
+        github_client.clone(),
+        workflow_runners,
+    )));
+    if !ignore_reviews {
+        match CheckReviewsStep::new(github_client.clone(), reviews_config) {
+            Ok(step) => steps.push(Box::new(step)),
+            Err(e) => {
+                error!("Failed to initialize check reviews step: {}", e);
+                exit(1);
+            }
+        };
+    }
+    steps
 }
 
 #[tokio::main]
@@ -89,22 +119,12 @@ async fn main() {
         "Starting loop on pull request: {}/{}/pulls/{} using github user {}",
         identifier.owner, identifier.repo, identifier.pull_number, config.github.username
     );
-    let check_reviews = match CheckReviewsStep::new(github_client.clone(), config.reviews) {
-        Ok(step) => step,
-        Err(e) => {
-            error!("Failed to initialize check reviews step: {}", e);
-            exit(1);
-        }
-    };
-    let steps: Vec<Box<dyn Step>> = vec![
-        Box::new(CheckCurrentStateStep::default()),
-        Box::new(check_reviews),
-        Box::new(CheckBehindMaster::new(github_client.clone())),
-        Box::new(CheckBuildFailed::new(
-            github_client.clone(),
-            workflow_runners,
-        )),
-    ];
+    let steps = build_steps(
+        github_client.clone(),
+        workflow_runners,
+        config.reviews,
+        options.ignore_reviews,
+    );
     let mut director = Director::new(github_client, merger, steps, identifier);
     loop {
         info!("Running checks on pull request...");

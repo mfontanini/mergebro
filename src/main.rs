@@ -22,6 +22,7 @@ use tokio::time::sleep;
 #[derive(StructOpt, Debug)]
 #[structopt(name = "mergebro")]
 struct Options {
+    /// The path to the YAML configuration file
     #[structopt(short, long, default_value = "~/.mergebro/config.yaml")]
     config_file: String,
 
@@ -33,6 +34,7 @@ struct Options {
     #[structopt(short = "r")]
     ignore_reviews: bool,
 
+    /// The pull request to be processed
     #[structopt(name = "pull_request_url")]
     pull_request_url: String,
 }

@@ -92,7 +92,7 @@ impl PullRequestMerger for DefaultPullRequestMerger {
                 Err(e) => return Err(e.into()),
             }
         }
-        Err(Error::Generic("No merge method allowed".into()))
+        Err(Error::as_generic("No merge method allowed"))
     }
 }
 

@@ -22,14 +22,14 @@ impl<C: CircleCiClient> CircleCiWorkflowRunner<C> {
         }
         let segments: Vec<_> = url
             .path_segments()
-            .ok_or_else(|| Error::Generic("invalid URL".into()))?
+            .ok_or_else(|| Error::as_generic("invalid URL"))?
             .collect();
         if segments.len() != 4 {
-            return Err(Error::Generic("invalid URL".into()));
+            return Err(Error::as_generic("invalid URL"));
         }
         let job_id = segments[3]
             .parse()
-            .map_err(|_| Error::Generic("invalid job id".into()))?;
+            .map_err(|_| Error::as_generic("invalid job id"))?;
         Ok(JobUrl::Job {
             owner: segments[1],
             repo: segments[2],

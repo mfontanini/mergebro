@@ -48,17 +48,17 @@ impl Step for CheckCurrentStateStep {
         match context.pull_request.state {
             PullRequestState::Open => {
                 if context.pull_request.draft {
-                    Err(Error::Generic("pull request is a draft".into()))
+                    Err(Error::as_generic("pull request is a draft"))
                 } else if matches!(context.pull_request.mergeable_state, MergeableState::Dirty) {
-                    Err(Error::Generic("pull request has conflicts".into()))
+                    Err(Error::as_generic("pull request has conflicts"))
                 } else {
                     Ok(StepStatus::Passed)
                 }
             }
             PullRequestState::Closed if context.pull_request.merged => {
-                Err(Error::Generic("pull request is already merged".into()))
+                Err(Error::as_generic("pull request is already merged"))
             }
-            PullRequestState::Closed => Err(Error::Generic("pull request is closed".into())),
+            PullRequestState::Closed => Err(Error::as_generic("pull request is closed")),
             PullRequestState::Unknown => Err(Error::UnsupportedPullRequestState(
                 "pull request state is unknown".into(),
             )),
@@ -91,7 +91,7 @@ impl CheckReviewsStep {
         for config in config.repos {
             match repo_configs.entry(config.repo) {
                 Entry::Occupied(entry) => {
-                    return Err(Error::Generic(format!(
+                    return Err(Error::as_generic(format!(
                         "duplicate review config for repo {}",
                         entry.key()
                     )))
@@ -164,7 +164,7 @@ impl Step for CheckReviewsStep {
                 "not enough approvals (need {}, have {})",
                 approvals_needed, total_users_approved
             );
-            Err(Error::Generic(reason))
+            Err(Error::as_generic(reason))
         } else {
             Ok(StepStatus::Passed)
         }
@@ -282,8 +282,8 @@ impl CheckBuildFailed {
             if total_triggered == 0 {
                 // There's failed jobs but we don't know how to re-trigger them. e.g. we don't support
                 // whatever service they're being ran on.
-                return Err(Error::Generic(
-                    "failed jobs belong to unknown external services".into(),
+                return Err(Error::as_generic(
+                    "failed jobs belong to unknown external services",
                 ));
             }
         } else if pending_count == 1 {
@@ -334,7 +334,7 @@ impl CheckBuildFailed {
 
     fn parse_status_url(url: &str) -> Result<Url, Error> {
         let url = Url::parse(url)
-            .map_err(|_| Error::Generic(format!("invalid status target URL: {}", url)))?;
+            .map_err(|_| Error::as_generic(format!("invalid status target URL: {}", url)))?;
         Ok(url)
     }
 }
@@ -364,8 +364,8 @@ impl Step for CheckBuildFailed {
             && context.pull_request.mergeable_state == MergeableState::Unstable
         {
             // This means we don't currently support whatever led this PR to be unstable
-            return Err(Error::Generic(
-                "pull request is unstable for unknown reasons".into(),
+            return Err(Error::as_generic(
+                "pull request is unstable for unknown reasons",
             ));
         } else {
             Ok(StepStatus::Waiting)

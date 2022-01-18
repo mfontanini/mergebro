@@ -49,13 +49,14 @@ fn build_steps(
     reviews_config: PullRequestReviewsConfig,
     ignore_reviews: bool,
 ) -> Vec<Box<dyn Step>> {
-    let mut steps: Vec<Box<dyn Step>> = vec![];
-    steps.push(Box::new(CheckCurrentStateStep::default()));
-    steps.push(Box::new(CheckBehindMaster::new(github_client.clone())));
-    steps.push(Box::new(CheckBuildFailed::new(
-        github_client.clone(),
-        workflow_runners,
-    )));
+    let mut steps: Vec<Box<dyn Step>> = vec![
+        Box::new(CheckCurrentStateStep::default()),
+        Box::new(CheckBehindMaster::new(github_client.clone())),
+        Box::new(CheckBuildFailed::new(
+            github_client.clone(),
+            workflow_runners,
+        )),
+    ];
     if !ignore_reviews {
         match CheckReviewsStep::new(github_client.clone(), reviews_config) {
             Ok(step) => steps.push(Box::new(step)),

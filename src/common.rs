@@ -83,10 +83,18 @@ pub struct MalformedRepoNameError(&'static str);
 
 #[derive(Debug, Clone)]
 pub struct RepoMap<T> {
+    default: T,
     entries: HashMap<RepoIdentifier, T>,
 }
 
 impl<T> RepoMap<T> {
+    pub fn new(default: T) -> Self {
+        Self {
+            default,
+            entries: HashMap::new(),
+        }
+    }
+
     pub fn insert(&mut self, repo: RepoIdentifier, value: T) -> Result<(), RepoMapError> {
         match self.entries.entry(repo) {
             Entry::Vacant(e) => {
@@ -97,21 +105,22 @@ impl<T> RepoMap<T> {
         }
     }
 
-    pub fn get(&self, owner: &str, repo: &str) -> Option<&T> {
+    pub fn get(&self, owner: &str, repo: &str) -> &T {
         let repo = RepoIdentifier::new(owner, RepoMatcher::Specific(repo.into()));
         if let Some(value) = self.entries.get(&repo) {
-            return Some(value);
+            return value;
         }
         let repo = RepoIdentifier::new(repo.owner, RepoMatcher::Wildcard);
-        self.entries.get(&repo)
+        self.entries.get(&repo).unwrap_or(&self.default)
     }
 }
 
-impl<T> Default for RepoMap<T> {
+impl<T> Default for RepoMap<T>
+where
+    T: Default,
+{
     fn default() -> Self {
-        Self {
-            entries: HashMap::default(),
-        }
+        Self::new(T::default())
     }
 }
 
@@ -162,10 +171,10 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(repo_map.get("owner", "repo"), Some(&1));
-        assert_eq!(repo_map.get("owner", "foo"), None);
-        assert_eq!(repo_map.get("other", "potato"), Some(&2));
-        assert_eq!(repo_map.get("other", "override"), Some(&3));
-        assert_eq!(repo_map.get("unrelated", "bar"), None);
+        assert_eq!(repo_map.get("owner", "repo"), &1);
+        assert_eq!(repo_map.get("owner", "foo"), &0);
+        assert_eq!(repo_map.get("other", "potato"), &2);
+        assert_eq!(repo_map.get("other", "override"), &3);
+        assert_eq!(repo_map.get("unrelated", "bar"), &0);
     }
 }

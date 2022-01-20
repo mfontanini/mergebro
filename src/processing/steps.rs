@@ -79,7 +79,6 @@ impl fmt::Display for CheckCurrentStateStep {
 /// rules require
 pub struct CheckReviewsStep {
     github: Arc<dyn GithubClient>,
-    default_config: ReviewsConfig,
     repo_configs: RepoMap<ReviewsConfig>,
 }
 
@@ -89,7 +88,7 @@ impl CheckReviewsStep {
         default_config: ReviewsConfig,
         repos: &[RepoConfig],
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut repo_configs = RepoMap::default();
+        let mut repo_configs = RepoMap::new(default_config);
         for repo_config in repos {
             if let Some(reviews) = &repo_config.reviews {
                 let repo_id = repo_config.repo.parse()?;
@@ -98,7 +97,6 @@ impl CheckReviewsStep {
         }
         Ok(Self {
             github,
-            default_config,
             repo_configs,
         })
     }
@@ -131,13 +129,8 @@ impl CheckReviewsStep {
         branch_protection: Option<BranchProtection>,
         context: &Context,
     ) -> u32 {
-        let configured_approvals = match self
-            .repo_configs
-            .get(&context.identifier.owner, &context.identifier.repo)
-        {
-            Some(config) => config.approvals,
-            None => self.default_config.approvals,
-        };
+        let id = &context.identifier;
+        let configured_approvals = self.repo_configs.get(&id.owner, &id.repo).approvals;
         match branch_protection {
             Some(protection) => protection.reviews.approvals.max(configured_approvals),
             None => configured_approvals,

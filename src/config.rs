@@ -2,7 +2,7 @@ use crate::github::MergeMethod;
 use config::{Config, ConfigError, Environment, File};
 use serde_derive::Deserialize;
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct MergebroConfig {
     pub github: GithubConfig,
 
@@ -15,11 +15,14 @@ pub struct MergebroConfig {
     #[serde(default)]
     pub workflows: WorkflowsConfig,
 
+    #[serde(default = "default_reviews_config")]
+    pub reviews: ReviewsConfig,
+
     #[serde(default)]
-    pub reviews: PullRequestReviewsConfig,
+    pub repos: Vec<RepoConfig>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct PollConfig {
     pub delay_seconds: u8,
 }
@@ -30,7 +33,7 @@ impl Default for PollConfig {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct MergeConfig {
     pub default_method: MergeMethod,
 }
@@ -43,55 +46,36 @@ impl Default for MergeConfig {
     }
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct GithubConfig {
     pub username: String,
     pub token: String,
 }
 
-#[derive(Deserialize, Debug, Default)]
+#[derive(Deserialize, Debug, Default, Clone)]
 pub struct WorkflowsConfig {
     pub circleci: Option<CircleCiConfig>,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 pub struct CircleCiConfig {
     pub token: String,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct PullRequestReviewsConfig {
-    #[serde(default = "default_reviews_config")]
-    pub default: ReviewsConfig,
-
-    #[serde(default)]
-    pub repos: Vec<RepoReviewsConfig>,
-}
-
-impl Default for PullRequestReviewsConfig {
-    fn default() -> Self {
-        Self {
-            default: default_reviews_config(),
-            repos: Vec::new(),
-        }
-    }
+#[derive(Deserialize, Debug, Clone)]
+pub struct ReviewsConfig {
+    pub approvals: u32,
 }
 
 fn default_reviews_config() -> ReviewsConfig {
     ReviewsConfig { approvals: 1 }
 }
 
-#[derive(Deserialize, Debug)]
-pub struct RepoReviewsConfig {
+#[derive(Deserialize, Debug, Clone)]
+pub struct RepoConfig {
     pub repo: String,
 
-    #[serde(flatten)]
-    pub config: ReviewsConfig,
-}
-
-#[derive(Deserialize, Debug)]
-pub struct ReviewsConfig {
-    pub approvals: u32,
+    pub reviews: Option<ReviewsConfig>,
 }
 
 impl MergebroConfig {

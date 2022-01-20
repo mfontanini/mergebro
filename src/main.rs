@@ -2,7 +2,6 @@ use env_logger::Env;
 use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
-    config::PullRequestReviewsConfig,
     github::{DefaultGithubClient, GithubClient, PullRequestIdentifier},
     processing::{
         steps::{
@@ -48,7 +47,7 @@ fn parse_pull_request_url(url: &str) -> Result<PullRequestIdentifier, Box<dyn st
 fn build_steps(
     github_client: Arc<dyn GithubClient>,
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
-    reviews_config: PullRequestReviewsConfig,
+    config: &MergebroConfig,
     ignore_reviews: bool,
 ) -> Vec<Box<dyn Step>> {
     let mut steps: Vec<Box<dyn Step>> = vec![
@@ -60,7 +59,7 @@ fn build_steps(
         )),
     ];
     if !ignore_reviews {
-        match CheckReviewsStep::new(github_client.clone(), reviews_config) {
+        match CheckReviewsStep::new(github_client.clone(), config.reviews.clone(), &config.repos) {
             Ok(step) => steps.push(Box::new(step)),
             Err(e) => {
                 error!("Failed to initialize check reviews step: {}", e);
@@ -86,7 +85,7 @@ async fn main() {
 
     let github_client = Arc::new(DefaultGithubClient::new(
         &config.github.username,
-        config.github.token,
+        config.github.token.clone(),
     ));
     let identifier = match parse_pull_request_url(&options.pull_request_url) {
         Ok(identifier) => identifier,
@@ -98,9 +97,8 @@ async fn main() {
 
     let mut workflow_runners: Vec<Arc<dyn WorkflowRunner>> = Vec::new();
     if config.workflows.circleci.is_some() {
-        let circleci_client = Arc::new(DefaultCircleCiClient::new(
-            config.workflows.circleci.unwrap().token,
-        ));
+        let token = config.workflows.circleci.as_ref().unwrap().token.clone();
+        let circleci_client = Arc::new(DefaultCircleCiClient::new(token));
         workflow_runners.push(Arc::new(CircleCiWorkflowRunner::new(circleci_client)));
     }
 
@@ -114,7 +112,7 @@ async fn main() {
         info!("Running in dry-run mode");
         Arc::new(DummyPullRequestMerger::default())
     } else {
-        Arc::new(DefaultPullRequestMerger::new(config.merge))
+        Arc::new(DefaultPullRequestMerger::new(config.merge.clone()))
     };
 
     let sleep_duration = Duration::from_secs(config.poll.delay_seconds as u64);
@@ -125,7 +123,7 @@ async fn main() {
     let steps = build_steps(
         github_client.clone(),
         workflow_runners,
-        config.reviews,
+        &config,
         options.ignore_reviews,
     );
     let mut director = Director::new(github_client, merger, steps, identifier);

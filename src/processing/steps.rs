@@ -1,7 +1,7 @@
 use super::{Error, WorkflowRunner, WorkflowStatus};
 use crate::{
     common::RepoMap,
-    config::{PullRequestReviewsConfig, ReviewsConfig},
+    config::{RepoConfig, ReviewsConfig},
     github::{
         Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
         PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
@@ -86,13 +86,15 @@ pub struct CheckReviewsStep {
 impl CheckReviewsStep {
     pub fn new(
         github: Arc<dyn GithubClient>,
-        config: PullRequestReviewsConfig,
+        default_config: ReviewsConfig,
+        repos: &[RepoConfig],
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let default_config = config.default;
         let mut repo_configs = RepoMap::default();
-        for config in config.repos {
-            let repo_id = config.repo.parse()?;
-            repo_configs.insert(repo_id, config.config)?;
+        for repo_config in repos {
+            if let Some(reviews) = &repo_config.reviews {
+                let repo_id = repo_config.repo.parse()?;
+                repo_configs.insert(repo_id, reviews.clone())?;
+            }
         }
         Ok(Self {
             github,

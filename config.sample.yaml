@@ -24,15 +24,17 @@ merge:
 # target branch. However, this is not available in repos you don't own so you can provide some default and
 # per repo settings to make sure there's enough approvals before attempting to merge a change.
 reviews:
-  default:
-    # By default require at least 2 approvals on all pull requests
-    approvals: 2
+  # By default require at least 1 approval on all pull requests
+  approvals: 1
 
-  repos:
-    # Specify 2 required approvals for this one repo
-    - repo: mfontanini/mergebro
+# Configurations to be applied to specific repos
+repos:
+  # Specify 2 required approvals for this one repo
+  - repo: mfontanini/mergebro
+    reviews:
       approvals: 2
 
-    # Specify higher required approvals for any repo under rust-lang
-    - repo: rust-lang/*
+  # Specify higher required approvals for any repo under rust-lang
+  - repo: rust-lang/*
+    reviews:
       approvals: 3

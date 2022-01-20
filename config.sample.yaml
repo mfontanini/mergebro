@@ -29,6 +29,10 @@ reviews:
     approvals: 2
 
   repos:
-    # Specify higher required approvals for this one repo
+    # Specify 2 required approvals for this one repo
     - repo: mfontanini/mergebro
+      approvals: 2
+
+    # Specify higher required approvals for any repo under rust-lang
+    - repo: rust-lang/*
       approvals: 3

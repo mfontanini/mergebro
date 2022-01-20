@@ -1,8 +1,11 @@
 use super::{Error, WorkflowRunner, WorkflowStatus};
-use crate::config::{PullRequestReviewsConfig, ReviewsConfig};
-use crate::github::{
-    Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
-    PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
+use crate::{
+    common::RepoMap,
+    config::{PullRequestReviewsConfig, ReviewsConfig},
+    github::{
+        Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
+        PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
+    },
 };
 use async_trait::async_trait;
 use log::{info, warn};
@@ -77,27 +80,19 @@ impl fmt::Display for CheckCurrentStateStep {
 pub struct CheckReviewsStep {
     github: Arc<dyn GithubClient>,
     default_config: ReviewsConfig,
-    repo_configs: HashMap<String, ReviewsConfig>,
+    repo_configs: RepoMap<ReviewsConfig>,
 }
 
 impl CheckReviewsStep {
     pub fn new(
         github: Arc<dyn GithubClient>,
         config: PullRequestReviewsConfig,
-    ) -> Result<Self, Error> {
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let default_config = config.default;
-        let mut repo_configs = HashMap::new();
-        use std::collections::hash_map::Entry;
+        let mut repo_configs = RepoMap::default();
         for config in config.repos {
-            match repo_configs.entry(config.repo) {
-                Entry::Occupied(entry) => {
-                    return Err(Error::as_generic(format!(
-                        "duplicate review config for repo {}",
-                        entry.key()
-                    )))
-                }
-                Entry::Vacant(entry) => entry.insert(config.config),
-            };
+            let repo_id = config.repo.parse()?;
+            repo_configs.insert(repo_id, config.config)?;
         }
         Ok(Self {
             github,
@@ -134,8 +129,10 @@ impl CheckReviewsStep {
         branch_protection: Option<BranchProtection>,
         context: &Context,
     ) -> u32 {
-        let repo = format!("{}/{}", context.identifier.owner, context.identifier.repo);
-        let configured_approvals = match self.repo_configs.get(&repo) {
+        let configured_approvals = match self
+            .repo_configs
+            .get(&context.identifier.owner, &context.identifier.repo)
+        {
             Some(config) => config.approvals,
             None => self.default_config.approvals,
         };

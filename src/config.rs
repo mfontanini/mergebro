@@ -61,6 +61,7 @@ pub struct CircleCiConfig {
 
 #[derive(Deserialize, Debug)]
 pub struct PullRequestReviewsConfig {
+    #[serde(default = "default_reviews_config")]
     pub default: ReviewsConfig,
 
     #[serde(default)]
@@ -70,10 +71,14 @@ pub struct PullRequestReviewsConfig {
 impl Default for PullRequestReviewsConfig {
     fn default() -> Self {
         Self {
-            default: ReviewsConfig { approvals: 1 },
+            default: default_reviews_config(),
             repos: Vec::new(),
         }
     }
+}
+
+fn default_reviews_config() -> ReviewsConfig {
+    ReviewsConfig { approvals: 1 }
 }
 
 #[derive(Deserialize, Debug)]

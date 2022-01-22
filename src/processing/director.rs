@@ -1,4 +1,4 @@
-use super::steps::{Context, Step, StepStatus};
+use super::steps::{Step, StepStatus};
 use super::{Error, PullRequestMerger};
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info};
@@ -27,9 +27,10 @@ impl Director {
     }
 
     pub async fn run(&mut self) -> Result<DirectorState, Error> {
-        let context = self.build_context().await?;
+        debug!("Fetching current state for pull request");
+        let pull_request = self.github.pull_request_info(&self.identifier).await?;
         for step in &mut self.steps {
-            let step_status = step.execute(&context).await?;
+            let step_status = step.execute(&pull_request).await?;
             match step_status {
                 StepStatus::Waiting => {
                     info!("Step '{}' is pending", step);
@@ -40,15 +41,9 @@ impl Director {
         }
         info!("All checks passed, pull request is ready to be merged!");
         self.merger
-            .merge(&context.identifier, &context.pull_request, &*self.github)
+            .merge(&self.identifier, &pull_request, &*self.github)
             .await?;
         Ok(DirectorState::Done)
-    }
-
-    async fn build_context(&self) -> Result<Context, Error> {
-        debug!("Fetching pull request context");
-        let info = self.github.pull_request_info(&self.identifier).await?;
-        Ok(Context::new(self.identifier.clone(), info))
     }
 }
 

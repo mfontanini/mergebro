@@ -17,22 +17,8 @@ use std::sync::Arc;
 
 #[async_trait]
 pub trait Step: fmt::Display {
-    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error>;
-}
-
-#[derive(Debug)]
-pub struct Context {
-    pub identifier: PullRequestIdentifier,
-    pub pull_request: PullRequest,
-}
-
-impl Context {
-    pub fn new(identifier: PullRequestIdentifier, pull_request: PullRequest) -> Self {
-        Self {
-            identifier,
-            pull_request,
-        }
-    }
+    /// Execute this step against the current state of this pull request
+    async fn execute(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error>;
 }
 
 #[derive(PartialEq, Debug, Clone, Hash)]
@@ -47,18 +33,18 @@ pub struct CheckCurrentStateStep;
 
 #[async_trait]
 impl Step for CheckCurrentStateStep {
-    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        match context.pull_request.state {
+    async fn execute(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
+        match pull_request.state {
             PullRequestState::Open => {
-                if context.pull_request.draft {
+                if pull_request.draft {
                     Err(Error::as_generic("pull request is a draft"))
-                } else if matches!(context.pull_request.mergeable_state, MergeableState::Dirty) {
+                } else if matches!(pull_request.mergeable_state, MergeableState::Dirty) {
                     Err(Error::as_generic("pull request has conflicts"))
                 } else {
                     Ok(StepStatus::Passed)
                 }
             }
-            PullRequestState::Closed if context.pull_request.merged => {
+            PullRequestState::Closed if pull_request.merged => {
                 Err(Error::as_generic("pull request is already merged"))
             }
             PullRequestState::Closed => Err(Error::as_generic("pull request is closed")),
@@ -78,12 +64,14 @@ impl fmt::Display for CheckCurrentStateStep {
 /// Checks whether a pull request is approved by however many people its branch protection
 /// rules require
 pub struct CheckReviewsStep {
+    identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
     repo_configs: RepoMap<ReviewsConfig>,
 }
 
 impl CheckReviewsStep {
     pub fn new(
+        identifier: PullRequestIdentifier,
         github: Arc<dyn GithubClient>,
         default_config: ReviewsConfig,
         repos: &[RepoConfig],
@@ -96,6 +84,7 @@ impl CheckReviewsStep {
             }
         }
         Ok(Self {
+            identifier,
             github,
             repo_configs,
         })
@@ -124,12 +113,8 @@ impl CheckReviewsStep {
         users_approved.len()
     }
 
-    fn required_approvals(
-        &self,
-        branch_protection: Option<BranchProtection>,
-        context: &Context,
-    ) -> u32 {
-        let id = &context.identifier;
+    fn required_approvals(&self, branch_protection: Option<BranchProtection>) -> u32 {
+        let id = &self.identifier;
         let configured_approvals = self.repo_configs.get(&id.owner, &id.repo).approvals;
         match branch_protection {
             Some(protection) => protection.reviews.approvals.max(configured_approvals),
@@ -140,15 +125,10 @@ impl CheckReviewsStep {
 
 #[async_trait]
 impl Step for CheckReviewsStep {
-    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        let branch_protection = self
-            .fetch_branch_protection(&context.pull_request.base)
-            .await?;
-        let approvals_needed = self.required_approvals(branch_protection, context) as usize;
-        let reviews = self
-            .github
-            .pull_request_reviews(&context.identifier)
-            .await?;
+    async fn execute(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
+        let branch_protection = self.fetch_branch_protection(&pull_request.base).await?;
+        let approvals_needed = self.required_approvals(branch_protection) as usize;
+        let reviews = self.github.pull_request_reviews(&self.identifier).await?;
         let total_users_approved = Self::compute_approvals(&reviews);
 
         if total_users_approved < approvals_needed {
@@ -171,24 +151,25 @@ impl fmt::Display for CheckReviewsStep {
 
 /// Checks whether a pull request is behind master, and updates it otherwise
 pub struct CheckBehindMaster {
+    identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
 }
 
 impl CheckBehindMaster {
-    pub fn new(github: Arc<dyn GithubClient>) -> Self {
-        Self { github }
+    pub fn new(identifier: PullRequestIdentifier, github: Arc<dyn GithubClient>) -> Self {
+        Self { identifier, github }
     }
 }
 
 #[async_trait]
 impl Step for CheckBehindMaster {
-    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        if !matches!(context.pull_request.mergeable_state, MergeableState::Behind) {
+    async fn execute(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
+        if !matches!(pull_request.mergeable_state, MergeableState::Behind) {
             return Ok(StepStatus::Passed);
         }
         let result = self
             .github
-            .update_branch(&context.identifier, &context.pull_request.head.sha)
+            .update_branch(&self.identifier, &pull_request.head.sha)
             .await;
         match result {
             Ok(_) => Ok(StepStatus::Waiting),
@@ -208,6 +189,7 @@ impl fmt::Display for CheckBehindMaster {
 
 /// Checks whether the build for a pull request failed, re-triggering CI runs if needed
 pub struct CheckBuildFailed {
+    identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
     repo_configs: RepoMap<HashMap<String, StatusFailuresConfig>>,
@@ -217,6 +199,7 @@ pub struct CheckBuildFailed {
 
 impl CheckBuildFailed {
     pub fn new(
+        identifier: PullRequestIdentifier,
         github: Arc<dyn GithubClient>,
         workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
         repos: &[RepoConfig],
@@ -234,6 +217,7 @@ impl CheckBuildFailed {
             repo_configs.insert(repo.repo.parse()?, status_config)?;
         }
         Ok(Self {
+            identifier,
             github,
             workflow_runners,
             repo_configs,
@@ -242,11 +226,11 @@ impl CheckBuildFailed {
         })
     }
 
-    async fn check_actions(&self, context: &Context) -> Result<StepStatus, Error> {
-        let action_runs = self.github.action_runs(&context.pull_request).await?;
+    async fn check_actions(&self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
+        let action_runs = self.github.action_runs(pull_request).await?;
         let mut last_run_per_workflow = HashMap::new();
         for run in action_runs.workflow_runs {
-            if run.head_sha != context.pull_request.head.sha {
+            if run.head_sha != pull_request.head.sha {
                 continue;
             }
             last_run_per_workflow.entry(run.workflow_id).or_insert(run);
@@ -261,15 +245,15 @@ impl CheckBuildFailed {
         for run in failed_workflows {
             warn!("Actions workflow '{}' failed, re-running it", run.name);
             self.github
-                .rerun_workflow(&context.pull_request.base.repo, run.id)
+                .rerun_workflow(&pull_request.base.repo, run.id)
                 .await?;
         }
         Ok(StepStatus::Waiting)
     }
 
-    async fn check_statuses(&mut self, context: &Context) -> Result<StepStatus, Error> {
+    async fn check_statuses(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
         // TODO: split this bunch of code a bit
-        let summaries = self.fetch_status_summaries(context).await?;
+        let summaries = self.fetch_status_summaries(pull_request).await?;
         let pending_count = summaries.pending_statuses.len();
         if pending_count == 0 {
             if summaries.failed_statuses.is_empty() {
@@ -279,7 +263,7 @@ impl CheckBuildFailed {
                 "Processing {} failed external jobs",
                 summaries.failed_statuses.len()
             );
-            self.check_max_failures(context, &summaries.failed_statuses)?;
+            self.check_max_failures(&summaries.failed_statuses)?;
             let failed_job_urls: Vec<_> = summaries
                 .failed_statuses
                 .into_iter()
@@ -313,14 +297,10 @@ impl CheckBuildFailed {
         Ok(StepStatus::Waiting)
     }
 
-    fn check_max_failures(
-        &mut self,
-        context: &Context,
-        failed_statuses: &[StatusSummary],
-    ) -> Result<(), Error> {
+    fn check_max_failures(&mut self, failed_statuses: &[StatusSummary]) -> Result<(), Error> {
         let status_configs = self
             .repo_configs
-            .get(&context.identifier.owner, &context.identifier.repo);
+            .get(&self.identifier.owner, &self.identifier.repo);
 
         for status in failed_statuses {
             if let Some(config) = status_configs.get(&status.name) {
@@ -337,11 +317,11 @@ impl CheckBuildFailed {
         Ok(())
     }
 
-    async fn fetch_status_summaries(&self, context: &Context) -> Result<StatusSummaries, Error> {
-        let statuses = self
-            .github
-            .pull_request_statuses(&context.pull_request)
-            .await?;
+    async fn fetch_status_summaries(
+        &self,
+        pull_request: &PullRequest,
+    ) -> Result<StatusSummaries, Error> {
+        let statuses = self.github.pull_request_statuses(pull_request).await?;
         let mut last_run_per_status = HashMap::new();
         // Note: there's 0 docs on this so it's unclear but it seems `context` is the thing to group by.
         for status in statuses {
@@ -388,24 +368,21 @@ struct StatusSummaries {
 
 #[async_trait]
 impl Step for CheckBuildFailed {
-    async fn execute(&mut self, context: &Context) -> Result<StepStatus, Error> {
-        if !matches!(
-            context.pull_request.mergeable_state,
-            MergeableState::Blocked
-        ) {
+    async fn execute(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
+        if !matches!(pull_request.mergeable_state, MergeableState::Blocked) {
             return Ok(StepStatus::Passed);
         }
-        if self.last_head_hash.as_ref() != Some(&context.pull_request.head.sha) {
+        if self.last_head_hash.as_ref() != Some(&pull_request.head.sha) {
             if self.last_head_hash.is_some() {
                 info!("Resetting failure counters as the head sha changed");
                 self.status_failures.clear();
             }
-            self.last_head_hash = Some(context.pull_request.head.sha.clone());
+            self.last_head_hash = Some(pull_request.head.sha.clone());
         }
-        let statuses_result = self.check_statuses(context).await?;
-        let actions_result = self.check_actions(context).await?;
+        let statuses_result = self.check_statuses(pull_request).await?;
+        let actions_result = self.check_actions(pull_request).await?;
         if (statuses_result, actions_result) == (StepStatus::Passed, StepStatus::Passed)
-            && context.pull_request.mergeable_state == MergeableState::Unstable
+            && pull_request.mergeable_state == MergeableState::Unstable
         {
             // This means we don't currently support whatever led this PR to be unstable
             return Err(Error::as_generic(

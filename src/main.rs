@@ -45,6 +45,7 @@ fn parse_pull_request_url(url: &str) -> Result<PullRequestIdentifier, Box<dyn st
 }
 
 fn build_steps(
+    id: &PullRequestIdentifier,
     github_client: Arc<dyn GithubClient>,
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
     config: &MergebroConfig,
@@ -52,8 +53,9 @@ fn build_steps(
 ) -> Result<Vec<Box<dyn Step>>, Box<dyn std::error::Error>> {
     let mut steps: Vec<Box<dyn Step>> = vec![
         Box::new(CheckCurrentStateStep::default()),
-        Box::new(CheckBehindMaster::new(github_client.clone())),
+        Box::new(CheckBehindMaster::new(id.clone(), github_client.clone())),
         Box::new(CheckBuildFailed::new(
+            id.clone(),
             github_client.clone(),
             workflow_runners,
             &config.repos,
@@ -61,6 +63,7 @@ fn build_steps(
     ];
     if !ignore_reviews {
         steps.push(Box::new(CheckReviewsStep::new(
+            id.clone(),
             github_client.clone(),
             config.reviews.clone(),
             &config.repos,
@@ -120,6 +123,7 @@ async fn main() {
         identifier.owner, identifier.repo, identifier.pull_number, config.github.username
     );
     let steps = build_steps(
+        &identifier,
         github_client.clone(),
         workflow_runners,
         &config,

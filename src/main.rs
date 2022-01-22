@@ -49,25 +49,24 @@ fn build_steps(
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
     config: &MergebroConfig,
     ignore_reviews: bool,
-) -> Vec<Box<dyn Step>> {
+) -> Result<Vec<Box<dyn Step>>, Box<dyn std::error::Error>> {
     let mut steps: Vec<Box<dyn Step>> = vec![
         Box::new(CheckCurrentStateStep::default()),
         Box::new(CheckBehindMaster::new(github_client.clone())),
         Box::new(CheckBuildFailed::new(
             github_client.clone(),
             workflow_runners,
-        )),
+            &config.repos,
+        )?),
     ];
     if !ignore_reviews {
-        match CheckReviewsStep::new(github_client.clone(), config.reviews.clone(), &config.repos) {
-            Ok(step) => steps.push(Box::new(step)),
-            Err(e) => {
-                error!("Failed to initialize check reviews step: {}", e);
-                exit(1);
-            }
-        };
+        steps.push(Box::new(CheckReviewsStep::new(
+            github_client.clone(),
+            config.reviews.clone(),
+            &config.repos,
+        )?));
     }
-    steps
+    Ok(steps)
 }
 
 #[tokio::main]
@@ -126,6 +125,13 @@ async fn main() {
         &config,
         options.ignore_reviews,
     );
+    let steps = match steps {
+        Ok(steps) => steps,
+        Err(e) => {
+            error!("Failed to initialize step checks: {}", e);
+            exit(1);
+        }
+    };
     let mut director = Director::new(github_client, merger, steps, identifier);
     loop {
         info!("Running checks on pull request...");

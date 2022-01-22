@@ -29,12 +29,18 @@ reviews:
 
 # Configurations to be applied to specific repos
 repos:
-  # Specify 2 required approvals for this one repo
   - repo: mfontanini/mergebro
+    # Specify 2 required approvals for this one repo
     reviews:
       approvals: 2
 
-  # Specify higher required approvals for any repo under rust-lang
+    statuses:
+      # Claim this particular status check in the PR is critical (and non flaky!) and therefore we bail out
+      # if we see even a single failure on it
+      - name: some critical, non flaky, CI step
+        max_failures: 1
+
   - repo: rust-lang/*
+    # Specify higher required approvals for any repo under rust-lang
     reviews:
       approvals: 3

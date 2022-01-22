@@ -76,6 +76,22 @@ pub struct RepoConfig {
     pub repo: String,
 
     pub reviews: Option<ReviewsConfig>,
+
+    #[serde(default)]
+    pub statuses: Vec<StatusConfig>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct StatusConfig {
+    pub name: String,
+
+    #[serde(flatten)]
+    pub failures: StatusFailuresConfig,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+pub struct StatusFailuresConfig {
+    pub max_failures: u32,
 }
 
 impl MergebroConfig {

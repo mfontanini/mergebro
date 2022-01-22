@@ -1,7 +1,7 @@
 use super::{Error, WorkflowRunner, WorkflowStatus};
 use crate::{
     common::RepoMap,
-    config::{RepoConfig, ReviewsConfig},
+    config::{RepoConfig, ReviewsConfig, StatusFailuresConfig},
     github::{
         Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
         PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
@@ -210,17 +210,36 @@ impl fmt::Display for CheckBehindMaster {
 pub struct CheckBuildFailed {
     github: Arc<dyn GithubClient>,
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
+    repo_configs: RepoMap<HashMap<String, StatusFailuresConfig>>,
+    last_head_hash: Option<String>,
+    status_failures: HashMap<String, u32>,
 }
 
 impl CheckBuildFailed {
     pub fn new(
         github: Arc<dyn GithubClient>,
         workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
-    ) -> Self {
-        Self {
+        repos: &[RepoConfig],
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let mut repo_configs = RepoMap::default();
+        for repo in repos {
+            if repo.statuses.is_empty() {
+                continue;
+            }
+            let mut status_config = HashMap::new();
+            for status in &repo.statuses {
+                // TODO: dedup
+                status_config.insert(status.name.clone(), status.failures.clone());
+            }
+            repo_configs.insert(repo.repo.parse()?, status_config)?;
+        }
+        Ok(Self {
             github,
             workflow_runners,
-        }
+            repo_configs,
+            last_head_hash: None,
+            status_failures: HashMap::default(),
+        })
     }
 
     async fn check_actions(&self, context: &Context) -> Result<StepStatus, Error> {
@@ -248,7 +267,8 @@ impl CheckBuildFailed {
         Ok(StepStatus::Waiting)
     }
 
-    async fn check_statuses(&self, context: &Context) -> Result<StepStatus, Error> {
+    async fn check_statuses(&mut self, context: &Context) -> Result<StepStatus, Error> {
+        // TODO: split this bunch of code a bit
         let summaries = self.fetch_status_summaries(context).await?;
         let pending_count = summaries.pending_statuses.len();
         if pending_count == 0 {
@@ -259,6 +279,7 @@ impl CheckBuildFailed {
                 "Processing {} failed external jobs",
                 summaries.failed_statuses.len()
             );
+            self.check_max_failures(context, &summaries.failed_statuses)?;
             let failed_job_urls: Vec<_> = summaries
                 .failed_statuses
                 .into_iter()
@@ -290,6 +311,30 @@ impl CheckBuildFailed {
             );
         };
         Ok(StepStatus::Waiting)
+    }
+
+    fn check_max_failures(
+        &mut self,
+        context: &Context,
+        failed_statuses: &[StatusSummary],
+    ) -> Result<(), Error> {
+        let status_configs = self
+            .repo_configs
+            .get(&context.identifier.owner, &context.identifier.repo);
+
+        for status in failed_statuses {
+            if let Some(config) = status_configs.get(&status.name) {
+                let failures = self.status_failures.entry(status.name.clone()).or_insert(0);
+                *failures += 1;
+                if *failures >= config.max_failures {
+                    return Err(Error::as_generic(format!(
+                        "Status check {} reached {} failures",
+                        status.name, failures
+                    )));
+                }
+            }
+        }
+        Ok(())
     }
 
     async fn fetch_status_summaries(&self, context: &Context) -> Result<StatusSummaries, Error> {
@@ -349,6 +394,13 @@ impl Step for CheckBuildFailed {
             MergeableState::Blocked
         ) {
             return Ok(StepStatus::Passed);
+        }
+        if self.last_head_hash.as_ref() != Some(&context.pull_request.head.sha) {
+            if self.last_head_hash.is_some() {
+                info!("Resetting failure counters as the head sha changed");
+                self.status_failures.clear();
+            }
+            self.last_head_hash = Some(context.pull_request.head.sha.clone());
         }
         let statuses_result = self.check_statuses(context).await?;
         let actions_result = self.check_actions(context).await?;

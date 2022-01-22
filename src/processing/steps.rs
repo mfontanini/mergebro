@@ -1,7 +1,6 @@
 use super::{Error, WorkflowRunner, WorkflowStatus};
 use crate::{
-    common::RepoMap,
-    config::{RepoConfig, ReviewsConfig, StatusFailuresConfig},
+    config::{ReviewsConfig, StatusFailuresConfig},
     github::{
         Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
         PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
@@ -66,27 +65,19 @@ impl fmt::Display for CheckCurrentStateStep {
 pub struct CheckReviewsStep {
     identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
-    repo_configs: RepoMap<ReviewsConfig>,
+    reviews: ReviewsConfig,
 }
 
 impl CheckReviewsStep {
     pub fn new(
         identifier: PullRequestIdentifier,
         github: Arc<dyn GithubClient>,
-        default_config: ReviewsConfig,
-        repos: &[RepoConfig],
+        reviews: ReviewsConfig,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut repo_configs = RepoMap::new(default_config);
-        for repo_config in repos {
-            if let Some(reviews) = &repo_config.reviews {
-                let repo_id = repo_config.repo.parse()?;
-                repo_configs.insert(repo_id, reviews.clone())?;
-            }
-        }
         Ok(Self {
             identifier,
             github,
-            repo_configs,
+            reviews,
         })
     }
 
@@ -114,8 +105,7 @@ impl CheckReviewsStep {
     }
 
     fn required_approvals(&self, branch_protection: Option<BranchProtection>) -> u32 {
-        let id = &self.identifier;
-        let configured_approvals = self.repo_configs.get(&id.owner, &id.repo).approvals;
+        let configured_approvals = self.reviews.approvals;
         match branch_protection {
             Some(protection) => protection.reviews.approvals.max(configured_approvals),
             None => configured_approvals,
@@ -189,39 +179,24 @@ impl fmt::Display for CheckBehindMaster {
 
 /// Checks whether the build for a pull request failed, re-triggering CI runs if needed
 pub struct CheckBuildFailed {
-    identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
-    repo_configs: RepoMap<HashMap<String, StatusFailuresConfig>>,
     last_head_hash: Option<String>,
+    status_failures_config: HashMap<String, StatusFailuresConfig>,
     status_failures: HashMap<String, u32>,
 }
 
 impl CheckBuildFailed {
     pub fn new(
-        identifier: PullRequestIdentifier,
         github: Arc<dyn GithubClient>,
         workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
-        repos: &[RepoConfig],
+        status_failures_config: HashMap<String, StatusFailuresConfig>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut repo_configs = RepoMap::default();
-        for repo in repos {
-            if repo.statuses.is_empty() {
-                continue;
-            }
-            let mut status_config = HashMap::new();
-            for status in &repo.statuses {
-                // TODO: dedup
-                status_config.insert(status.name.clone(), status.failures.clone());
-            }
-            repo_configs.insert(repo.repo.parse()?, status_config)?;
-        }
         Ok(Self {
-            identifier,
             github,
             workflow_runners,
-            repo_configs,
             last_head_hash: None,
+            status_failures_config,
             status_failures: HashMap::default(),
         })
     }
@@ -298,12 +273,8 @@ impl CheckBuildFailed {
     }
 
     fn check_max_failures(&mut self, failed_statuses: &[StatusSummary]) -> Result<(), Error> {
-        let status_configs = self
-            .repo_configs
-            .get(&self.identifier.owner, &self.identifier.repo);
-
         for status in failed_statuses {
-            if let Some(config) = status_configs.get(&status.name) {
+            if let Some(config) = self.status_failures_config.get(&status.name) {
                 let failures = self.status_failures.entry(status.name.clone()).or_insert(0);
                 *failures += 1;
                 if *failures >= config.max_failures {

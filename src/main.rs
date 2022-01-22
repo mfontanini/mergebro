@@ -2,6 +2,8 @@ use env_logger::Env;
 use log::{error, info};
 use mergebro::{
     circleci::{CircleCiWorkflowRunner, DefaultCircleCiClient},
+    common::{RepoIdentifier, RepoMap},
+    config::{ReviewsConfig, StatusFailuresConfig},
     github::{DefaultGithubClient, GithubClient, PullRequestIdentifier},
     processing::{
         steps::{
@@ -12,6 +14,8 @@ use mergebro::{
     Director, DirectorState, MergebroConfig, WorkflowRunner,
 };
 use reqwest::Url;
+use std::collections::HashMap;
+use std::error::Error;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::Duration;
@@ -38,10 +42,38 @@ struct Options {
     pull_request_url: String,
 }
 
-fn parse_pull_request_url(url: &str) -> Result<PullRequestIdentifier, Box<dyn std::error::Error>> {
+fn parse_pull_request_url(url: &str) -> Result<PullRequestIdentifier, Box<dyn Error>> {
     let url = Url::parse(url)?;
     let pull_request_id = PullRequestIdentifier::from_app_url(&url)?;
     Ok(pull_request_id)
+}
+
+struct SplitRepoConfigs {
+    reviews_config: RepoMap<ReviewsConfig>,
+    status_failures_config: RepoMap<HashMap<String, StatusFailuresConfig>>,
+}
+
+fn split_repo_configs(config: &MergebroConfig) -> Result<SplitRepoConfigs, Box<dyn Error>> {
+    let mut reviews_config = RepoMap::new(config.reviews.clone());
+    let mut status_failures_config = RepoMap::default();
+    for repo_config in &config.repos {
+        let repo: RepoIdentifier = repo_config.repo.parse()?;
+        if let Some(reviews) = &repo_config.reviews {
+            reviews_config.insert(repo.clone(), reviews.clone())?;
+        }
+        if !repo_config.statuses.is_empty() {
+            let mut status_config = HashMap::new();
+            for status in &repo_config.statuses {
+                // TODO: dedup
+                status_config.insert(status.name.clone(), status.failures.clone());
+            }
+            status_failures_config.insert(repo.clone(), status_config)?;
+        }
+    }
+    Ok(SplitRepoConfigs {
+        reviews_config,
+        status_failures_config,
+    })
 }
 
 fn build_steps(
@@ -50,23 +82,28 @@ fn build_steps(
     workflow_runners: Vec<Arc<dyn WorkflowRunner>>,
     config: &MergebroConfig,
     ignore_reviews: bool,
-) -> Result<Vec<Box<dyn Step>>, Box<dyn std::error::Error>> {
+) -> Result<Vec<Box<dyn Step>>, Box<dyn Error>> {
+    let split_repo_configs = split_repo_configs(config)?;
     let mut steps: Vec<Box<dyn Step>> = vec![
         Box::new(CheckCurrentStateStep::default()),
         Box::new(CheckBehindMaster::new(id.clone(), github_client.clone())),
         Box::new(CheckBuildFailed::new(
-            id.clone(),
             github_client.clone(),
             workflow_runners,
-            &config.repos,
+            split_repo_configs
+                .status_failures_config
+                .get(&id.owner, &id.repo)
+                .clone(),
         )?),
     ];
     if !ignore_reviews {
         steps.push(Box::new(CheckReviewsStep::new(
             id.clone(),
             github_client.clone(),
-            config.reviews.clone(),
-            &config.repos,
+            split_repo_configs
+                .reviews_config
+                .get(&id.owner, &id.repo)
+                .clone(),
         )?));
     }
     Ok(steps)

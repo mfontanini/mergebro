@@ -12,16 +12,16 @@ pub trait GithubClient: Send + Sync {
     async fn pull_request_info(&self, id: &PullRequestIdentifier) -> Result<PullRequest>;
     async fn pull_request_reviews(
         &self,
-        id: &PullRequestIdentifier,
+        pull_request: &PullRequest,
     ) -> Result<Vec<PullRequestReview>>;
     async fn pull_request_statuses(&self, pull_request: &PullRequest) -> Result<Vec<Status>>;
     async fn branch_protection(&self, branch: &Branch) -> Result<BranchProtection>;
-    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody>;
+    async fn update_branch(&self, pull_request: &PullRequest) -> Result<NoBody>;
     async fn action_runs(&self, pull_request: &PullRequest) -> Result<ActionRuns>;
     async fn rerun_workflow(&self, repo: &Repository, run_id: u64) -> Result<NoBody>;
     async fn merge_pull_request(
         &self,
-        id: &PullRequestIdentifier,
+        pull_request: &PullRequest,
         body: &MergeRequestBody,
     ) -> Result<NoBody>; // TODO: add body
 }
@@ -49,13 +49,12 @@ impl DefaultGithubClient {
         }
     }
 
-    fn make_pull_request_url(id: &PullRequestIdentifier) -> String {
+    fn make_pull_request_url(pull_request: &PullRequest) -> String {
         format!(
-            "{}/repos/{}/{}/pulls/{}",
+            "{}/repos/{}/pulls/{}",
             Self::API_BASE,
-            id.owner,
-            id.repo,
-            id.pull_number
+            pull_request.base.repo.full_name,
+            pull_request.number
         )
     }
 }
@@ -63,15 +62,21 @@ impl DefaultGithubClient {
 #[async_trait]
 impl GithubClient for DefaultGithubClient {
     async fn pull_request_info(&self, id: &PullRequestIdentifier) -> Result<PullRequest> {
-        let url = Self::make_pull_request_url(id);
+        let url = format!(
+            "{}/repos/{}/{}/pulls/{}",
+            Self::API_BASE,
+            id.owner,
+            id.repo,
+            id.pull_number
+        );
         self.client.get(&url).await
     }
 
     async fn pull_request_reviews(
         &self,
-        id: &PullRequestIdentifier,
+        pull_request: &PullRequest,
     ) -> Result<Vec<PullRequestReview>> {
-        let url = format!("{}/reviews", Self::make_pull_request_url(id));
+        let url = format!("{}/reviews", Self::make_pull_request_url(pull_request));
         self.client.get(&url).await
     }
 
@@ -90,10 +95,13 @@ impl GithubClient for DefaultGithubClient {
         self.client.get(&url).await
     }
 
-    async fn update_branch(&self, id: &PullRequestIdentifier, head_sha: &str) -> Result<NoBody> {
-        let url = format!("{}/update-branch", Self::make_pull_request_url(id));
+    async fn update_branch(&self, pull_request: &PullRequest) -> Result<NoBody> {
+        let url = format!(
+            "{}/update-branch",
+            Self::make_pull_request_url(pull_request)
+        );
         let body = UpdateBranchRequest {
-            expected_head_sha: head_sha.into(),
+            expected_head_sha: pull_request.head.sha.clone(),
         };
         self.client.put(&url, &body).await
     }
@@ -123,10 +131,10 @@ impl GithubClient for DefaultGithubClient {
 
     async fn merge_pull_request(
         &self,
-        id: &PullRequestIdentifier,
+        pull_request: &PullRequest,
         body: &MergeRequestBody,
     ) -> Result<NoBody> {
-        let url = format!("{}/merge", Self::make_pull_request_url(id));
+        let url = format!("{}/merge", Self::make_pull_request_url(pull_request));
         self.client.put(&url, body).await
     }
 }

@@ -88,6 +88,7 @@ pub struct PullRequestReview {
 pub struct Repository {
     pub name: String,
     pub owner: User,
+    pub full_name: String,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -118,6 +119,7 @@ pub struct PullRequest {
     pub merged: bool,
     pub draft: bool,
     pub body: Option<String>,
+    pub number: u32,
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq, Default)]

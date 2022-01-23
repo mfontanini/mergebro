@@ -2,8 +2,8 @@ use super::{Error, WorkflowRunner, WorkflowStatus};
 use crate::{
     config::{ReviewsConfig, StatusFailuresConfig},
     github::{
-        Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestIdentifier,
-        PullRequestReview, PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
+        Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestReview,
+        PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
     },
 };
 use async_trait::async_trait;
@@ -63,22 +63,16 @@ impl fmt::Display for CheckCurrentStateStep {
 /// Checks whether a pull request is approved by however many people its branch protection
 /// rules require
 pub struct CheckReviewsStep {
-    identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
     reviews: ReviewsConfig,
 }
 
 impl CheckReviewsStep {
     pub fn new(
-        identifier: PullRequestIdentifier,
         github: Arc<dyn GithubClient>,
         reviews: ReviewsConfig,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        Ok(Self {
-            identifier,
-            github,
-            reviews,
-        })
+        Ok(Self { github, reviews })
     }
 
     async fn fetch_branch_protection(
@@ -118,7 +112,7 @@ impl Step for CheckReviewsStep {
     async fn execute(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
         let branch_protection = self.fetch_branch_protection(&pull_request.base).await?;
         let approvals_needed = self.required_approvals(branch_protection) as usize;
-        let reviews = self.github.pull_request_reviews(&self.identifier).await?;
+        let reviews = self.github.pull_request_reviews(pull_request).await?;
         let total_users_approved = Self::compute_approvals(&reviews);
 
         if total_users_approved < approvals_needed {
@@ -141,13 +135,12 @@ impl fmt::Display for CheckReviewsStep {
 
 /// Checks whether a pull request is behind master, and updates it otherwise
 pub struct CheckBehindMaster {
-    identifier: PullRequestIdentifier,
     github: Arc<dyn GithubClient>,
 }
 
 impl CheckBehindMaster {
-    pub fn new(identifier: PullRequestIdentifier, github: Arc<dyn GithubClient>) -> Self {
-        Self { identifier, github }
+    pub fn new(github: Arc<dyn GithubClient>) -> Self {
+        Self { github }
     }
 }
 
@@ -157,10 +150,7 @@ impl Step for CheckBehindMaster {
         if !matches!(pull_request.mergeable_state, MergeableState::Behind) {
             return Ok(StepStatus::Passed);
         }
-        let result = self
-            .github
-            .update_branch(&self.identifier, &pull_request.head.sha)
-            .await;
+        let result = self.github.update_branch(pull_request).await;
         match result {
             Ok(_) => Ok(StepStatus::Waiting),
             // Technically we should retry but this means the head sha has _just_ changed so

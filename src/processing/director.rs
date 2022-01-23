@@ -40,9 +40,7 @@ impl Director {
             };
         }
         info!("All checks passed, pull request is ready to be merged!");
-        self.merger
-            .merge(&self.identifier, &pull_request, &*self.github)
-            .await?;
+        self.merger.merge(&pull_request, &*self.github).await?;
         Ok(DirectorState::Done)
     }
 }

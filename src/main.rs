@@ -86,7 +86,7 @@ fn build_steps(
     let split_repo_configs = split_repo_configs(config)?;
     let mut steps: Vec<Box<dyn Step>> = vec![
         Box::new(CheckCurrentStateStep::default()),
-        Box::new(CheckBehindMaster::new(id.clone(), github_client.clone())),
+        Box::new(CheckBehindMaster::new(github_client.clone())),
         Box::new(CheckBuildFailed::new(
             github_client.clone(),
             workflow_runners,
@@ -98,7 +98,6 @@ fn build_steps(
     ];
     if !ignore_reviews {
         steps.push(Box::new(CheckReviewsStep::new(
-            id.clone(),
             github_client.clone(),
             split_repo_configs
                 .reviews_config

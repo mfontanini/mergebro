@@ -1,7 +1,7 @@
 use crate::config::MergeConfig;
 use crate::github::{
     client::{GithubClient, MergeRequestBody},
-    MergeMethod, PullRequest, PullRequestIdentifier,
+    MergeMethod, PullRequest,
 };
 use crate::processing::Error;
 use async_trait::async_trait;
@@ -11,7 +11,6 @@ use log::{info, warn};
 pub trait PullRequestMerger {
     async fn merge(
         &self,
-        id: &PullRequestIdentifier,
         pull_request: &PullRequest,
         github: &dyn GithubClient,
     ) -> Result<(), Error>;
@@ -29,7 +28,6 @@ impl DefaultPullRequestMerger {
 
     async fn merge_with_method(
         &self,
-        id: &PullRequestIdentifier,
         pull_request: &PullRequest,
         github: &dyn GithubClient,
         method: &MergeMethod,
@@ -41,7 +39,9 @@ impl DefaultPullRequestMerger {
             commit_message,
             merge_method: method.clone(),
         };
-        github.merge_pull_request(id, &request_body).await?;
+        github
+            .merge_pull_request(pull_request, &request_body)
+            .await?;
         Ok(())
     }
 
@@ -68,7 +68,6 @@ impl DefaultPullRequestMerger {
 impl PullRequestMerger for DefaultPullRequestMerger {
     async fn merge(
         &self,
-        id: &PullRequestIdentifier,
         pull_request: &PullRequest,
         github: &dyn GithubClient,
     ) -> Result<(), Error> {
@@ -77,10 +76,7 @@ impl PullRequestMerger for DefaultPullRequestMerger {
                 "Attempting to merge pull request using '{:?}' merge method",
                 method
             );
-            match self
-                .merge_with_method(id, pull_request, github, method)
-                .await
-            {
+            match self.merge_with_method(pull_request, github, method).await {
                 Ok(_) => {
                     info!("Pull request merged ✔️");
                     return Ok(());
@@ -103,7 +99,6 @@ pub struct DummyPullRequestMerger;
 impl PullRequestMerger for DummyPullRequestMerger {
     async fn merge(
         &self,
-        _id: &PullRequestIdentifier,
         _pull_request: &PullRequest,
         _github: &dyn GithubClient,
     ) -> Result<(), crate::processing::Error> {

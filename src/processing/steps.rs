@@ -217,49 +217,45 @@ impl CheckBuildFailed {
     }
 
     async fn check_statuses(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
-        // TODO: split this bunch of code a bit
         let summaries = self.fetch_status_summaries(pull_request).await?;
-        let pending_count = summaries.pending_statuses.len();
-        if pending_count == 0 {
-            if summaries.failed_statuses.is_empty() {
-                return Ok(StepStatus::Passed);
-            }
-            warn!(
-                "Processing {} failed external jobs",
-                summaries.failed_statuses.len()
-            );
-            self.check_max_failures(&summaries.failed_statuses)?;
-            let failed_job_urls: Vec<_> = summaries
-                .failed_statuses
-                .into_iter()
-                .map(|summary| summary.url)
-                .collect();
-            let mut total_triggered = 0;
-            for runner in &self.workflow_runners {
-                if runner.process_failed_jobs(&failed_job_urls).await? == WorkflowStatus::Triggered
-                {
-                    total_triggered += 1;
+        let pending = summaries.pending_statuses;
+        let pending_count = pending.len();
+        match pending_count {
+            0 => {
+                if summaries.failed_statuses.is_empty() {
+                    return Ok(StepStatus::Passed);
                 }
+                self.process_failed_statuses(summaries.failed_statuses)
+                    .await?;
             }
-            if total_triggered == 0 {
-                // There's failed jobs but we don't know how to re-trigger them. e.g. we don't support
-                // whatever service they're being ran on.
-                return Err(Error::as_generic(
-                    "failed jobs belong to unknown external services",
-                ));
+            1 => {
+                info!("Waiting for external job '{}' to finish", pending[0].name);
             }
-        } else if pending_count == 1 {
-            info!(
-                "Waiting for external job '{}' to finish running",
-                summaries.pending_statuses[0].name
-            );
-        } else {
-            info!(
-                "Waiting for {} external jobs to finish running",
-                summaries.pending_statuses.len()
-            );
-        };
+            _ => {
+                info!("Waiting for {} external jobs to finish", pending.len());
+            }
+        }
         Ok(StepStatus::Waiting)
+    }
+
+    async fn process_failed_statuses(&mut self, statuses: Vec<StatusSummary>) -> Result<(), Error> {
+        warn!("Processing {} failed external jobs", statuses.len());
+        self.check_max_failures(&statuses)?;
+        let failed_job_urls: Vec<_> = statuses.into_iter().map(|summary| summary.url).collect();
+        let mut total_triggered = 0;
+        for runner in &self.workflow_runners {
+            if runner.process_failed_jobs(&failed_job_urls).await? == WorkflowStatus::Triggered {
+                total_triggered += 1;
+            }
+        }
+        if total_triggered == 0 {
+            // There's failed jobs but we don't know how to re-trigger them. e.g. we don't support
+            // whatever service they're being ran on.
+            return Err(Error::as_generic(
+                "failed jobs belong to unknown external services",
+            ));
+        }
+        Ok(())
     }
 
     fn check_max_failures(&mut self, failed_statuses: &[StatusSummary]) -> Result<(), Error> {
@@ -269,7 +265,7 @@ impl CheckBuildFailed {
                 *failures += 1;
                 if *failures >= config.max_failures {
                     return Err(Error::as_generic(format!(
-                        "Status check {} reached {} failures",
+                        "status check '{}' reached {} failures",
                         status.name, failures
                     )));
                 }
@@ -343,11 +339,11 @@ impl Step for CheckBuildFailed {
         let statuses_result = self.check_statuses(pull_request).await?;
         let actions_result = self.check_actions(pull_request).await?;
         if (statuses_result, actions_result) == (StepStatus::Passed, StepStatus::Passed)
-            && pull_request.mergeable_state == MergeableState::Unstable
+            && pull_request.mergeable_state == MergeableState::Blocked
         {
-            // This means we don't currently support whatever led this PR to be unstable
+            // This means we don't currently support/know whatever led this PR to be unstable
             return Err(Error::as_generic(
-                "pull request is unstable for unknown reasons",
+                "pull request is blocked for unknown reasons",
             ));
         } else {
             Ok(StepStatus::Waiting)

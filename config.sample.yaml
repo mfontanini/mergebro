@@ -20,7 +20,7 @@ merge:
   default_method: squash
 
 
-# The pull request reviews configuration. mergebro will fetch and honor the branch protection settings from the
+# The pull request reviews configuration. mergebro will fetch and honor the branch protection settings on the
 # target branch. However, this is not available in repos you don't own so you can provide some default and
 # per repo settings to make sure there's enough approvals before attempting to merge a change.
 reviews:
@@ -35,9 +35,9 @@ repos:
       approvals: 2
 
     statuses:
-      # Claim this particular status check in the PR is critical (and non flaky!) and therefore we bail out
+      # Claim this particular status check in the PR is not flaky and therefore we should bail out
       # if we see even a single failure on it
-      - name: some critical, non flaky, CI step
+      - name: some non flaky CI step
         max_failures: 1
 
   - repo: rust-lang/*

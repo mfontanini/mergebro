@@ -150,6 +150,8 @@ impl Step for CheckBehindMaster {
         if !matches!(pull_request.mergeable_state, MergeableState::Behind) {
             return Ok(StepStatus::Passed);
         }
+        warn!("Pull request branch is behind master, updating it");
+
         let result = self.github.update_branch(pull_request).await;
         match result {
             Ok(_) => Ok(StepStatus::Waiting),

@@ -1,5 +1,5 @@
 use super::steps::{Step, StepStatus};
-use super::{Error, PullRequestMerger};
+use super::{merge::MergeResult, Error, PullRequestMerger};
 use crate::github::{GithubClient, PullRequestIdentifier};
 use log::{debug, info};
 use std::sync::Arc;
@@ -40,8 +40,13 @@ impl Director {
             };
         }
         info!("All checks passed, pull request is ready to be merged!");
-        self.merger.merge(&pull_request, &*self.github).await?;
-        Ok(DirectorState::Done)
+        match self.merger.merge(&pull_request, &*self.github).await? {
+            MergeResult::Success => Ok(DirectorState::Done),
+            MergeResult::Conflict => {
+                info!("Found conflict while attempting merge");
+                Ok(DirectorState::Waiting)
+            }
+        }
     }
 }
 

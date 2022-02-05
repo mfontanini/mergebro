@@ -7,13 +7,18 @@ use crate::processing::Error;
 use async_trait::async_trait;
 use log::{info, warn};
 
+pub enum MergeResult {
+    Success,
+    Conflict,
+}
+
 #[async_trait]
 pub trait PullRequestMerger {
     async fn merge(
         &self,
         pull_request: &PullRequest,
         github: &dyn GithubClient,
-    ) -> Result<(), Error>;
+    ) -> Result<MergeResult, Error>;
 }
 
 pub struct DefaultPullRequestMerger {
@@ -70,7 +75,7 @@ impl PullRequestMerger for DefaultPullRequestMerger {
         &self,
         pull_request: &PullRequest,
         github: &dyn GithubClient,
-    ) -> Result<(), Error> {
+    ) -> Result<MergeResult, Error> {
         for method in &self.merge_methods {
             info!(
                 "Attempting to merge pull request using '{:?}' merge method",
@@ -79,16 +84,20 @@ impl PullRequestMerger for DefaultPullRequestMerger {
             match self.merge_with_method(pull_request, github, method).await {
                 Ok(_) => {
                     info!("Pull request merged ✔️");
-                    return Ok(());
+                    return Ok(MergeResult::Success);
                 }
                 Err(e) if e.method_not_allowed() => {
                     warn!("Merge method '{:?}' not allowed", method);
                     continue;
                 }
+                Err(e) if e.conflict() => {
+                    warn!("Branch sha may have been modified manually");
+                    return Ok(MergeResult::Conflict);
+                }
                 Err(e) => return Err(e.into()),
             }
         }
-        Err(Error::as_generic("No merge method allowed"))
+        Ok(MergeResult::Conflict)
     }
 }
 
@@ -101,9 +110,9 @@ impl PullRequestMerger for DummyPullRequestMerger {
         &self,
         _pull_request: &PullRequest,
         _github: &dyn GithubClient,
-    ) -> Result<(), crate::processing::Error> {
+    ) -> Result<MergeResult, crate::processing::Error> {
         info!("Skipping pull request merge step");
-        Ok(())
+        Ok(MergeResult::Success)
     }
 }
 

@@ -113,6 +113,10 @@ impl Error {
     pub fn too_many_requests(&self) -> bool {
         matches!(self, Self::Http(StatusCode::TOO_MANY_REQUESTS))
     }
+
+    pub fn conflict(&self) -> bool {
+        matches!(self, Self::Http(StatusCode::CONFLICT))
+    }
 }
 
 async fn retry_request_if_needed<F, R, O>(requestor: F) -> Result<O>

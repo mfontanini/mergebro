@@ -24,6 +24,12 @@ pub enum MergeableState {
     Unknown,
 }
 
+impl Default for MergeableState {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 pub enum PullRequestState {
     #[serde(rename = "open")]
@@ -36,7 +42,13 @@ pub enum PullRequestState {
     Unknown,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+impl Default for PullRequestState {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Link {
     href: String,
 }
@@ -49,12 +61,12 @@ impl Deref for Link {
     }
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Links {
     pub statuses: Link,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct User {
     pub login: String,
 }
@@ -84,14 +96,14 @@ pub struct PullRequestReview {
     pub submitted_at: chrono::DateTime<chrono::Local>,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Repository {
     pub name: String,
     pub owner: User,
     pub full_name: String,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct Branch {
     pub sha: String,
 
@@ -102,7 +114,7 @@ pub struct Branch {
     pub repo: Repository,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct PullRequest {
     pub mergeable_state: MergeableState,
 
@@ -179,7 +191,7 @@ pub struct ActionRuns {
     pub workflow_runs: Vec<WorkflowRun>,
 }
 
-#[derive(Deserialize, Debug, Clone, PartialEq)]
+#[derive(Deserialize, Debug, Clone, PartialEq, Default)]
 pub struct WorkflowRun {
     pub id: u64,
     pub workflow_id: u64,
@@ -202,6 +214,12 @@ pub enum WorfklowRunStatus {
 
     #[serde(other)]
     Unknown,
+}
+
+impl Default for WorfklowRunStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
 }
 
 #[derive(Deserialize, Debug, Clone, PartialEq)]

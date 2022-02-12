@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use serde_derive::Serialize;
 
 #[async_trait]
+#[cfg_attr(test, mockall::automock)]
 pub trait GithubClient: Send + Sync {
     async fn pull_request_info(&self, id: &PullRequestIdentifier) -> Result<PullRequest>;
     async fn pull_request_reviews(
@@ -113,7 +114,7 @@ impl GithubClient for DefaultGithubClient {
             pull_request.base.repo.owner.login,
             pull_request.base.repo.name,
             pull_request.head.name,
-            pull_request.head.repo.owner.login
+            pull_request.creator.login
         );
         self.client.get(&url).await
     }

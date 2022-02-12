@@ -3,7 +3,7 @@ use crate::{
     config::{ReviewsConfig, StatusFailuresConfig},
     github::{
         Branch, BranchProtection, GithubClient, MergeableState, PullRequest, PullRequestReview,
-        PullRequestState, ReviewState, StatusState, WorkflowRunConclusion,
+        PullRequestState, ReviewState, StatusState, WorkflowRun, WorkflowRunConclusion,
     },
 };
 use async_trait::async_trait;
@@ -194,26 +194,20 @@ impl CheckBuildFailed {
     }
 
     async fn check_actions(&self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
-        let action_runs = self.github.action_runs(pull_request).await?;
-        let mut last_run_per_workflow = HashMap::new();
-        for run in action_runs.workflow_runs {
-            if run.head_sha != pull_request.head.sha {
-                continue;
+        let split_runs = self.fetch_action_runs(pull_request).await?;
+        match split_runs.pending.len() {
+            0 => {
+                if split_runs.failed.is_empty() {
+                    return Ok(StepStatus::Passed);
+                }
+                self.process_failed_actions(pull_request, &split_runs.failed)
+                    .await?;
             }
-            last_run_per_workflow.entry(run.workflow_id).or_insert(run);
-        }
-        let failed_workflows: Vec<_> = last_run_per_workflow
-            .values()
-            .filter(|run| run.conclusion == Some(WorkflowRunConclusion::Failure))
-            .collect();
-        if failed_workflows.is_empty() {
-            return Ok(StepStatus::Passed);
-        }
-        for run in failed_workflows {
-            warn!("Actions workflow '{}' failed, re-running it", run.name);
-            self.github
-                .rerun_workflow(&pull_request.base.repo, run.id)
-                .await?;
+            1 => info!(
+                "Waiting for '{}' action workflow to finish",
+                split_runs.pending[0].name,
+            ),
+            count => info!("Waiting for {} actions workflow to finish", count),
         }
         Ok(StepStatus::Waiting)
     }
@@ -308,6 +302,44 @@ impl CheckBuildFailed {
         })
     }
 
+    async fn fetch_action_runs(
+        &self,
+        pull_request: &PullRequest,
+    ) -> Result<SplitActionRuns, Error> {
+        let action_runs = self.github.action_runs(pull_request).await?;
+        let mut last_run_per_workflow = HashMap::new();
+        for run in action_runs.workflow_runs {
+            if run.head_sha != pull_request.head.sha {
+                continue;
+            }
+            last_run_per_workflow.entry(run.workflow_id).or_insert(run);
+        }
+        let mut pending = Vec::new();
+        let mut failed = Vec::new();
+        for run in last_run_per_workflow.into_values() {
+            match run.conclusion {
+                None => pending.push(run),
+                Some(WorkflowRunConclusion::Failure) => failed.push(run),
+                _ => (),
+            }
+        }
+        Ok(SplitActionRuns { pending, failed })
+    }
+
+    async fn process_failed_actions(
+        &self,
+        pull_request: &PullRequest,
+        actions: &[WorkflowRun],
+    ) -> Result<(), Error> {
+        for run in actions {
+            warn!("Actions workflow '{}' failed, re-running it", run.name);
+            self.github
+                .rerun_workflow(&pull_request.base.repo, run.id)
+                .await?;
+        }
+        Ok(())
+    }
+
     fn parse_status_url(url: &str) -> Result<Url, Error> {
         let url = Url::parse(url)
             .map_err(|_| Error::as_generic(format!("invalid status target URL: {}", url)))?;
@@ -323,6 +355,11 @@ struct StatusSummary {
 struct StatusSummaries {
     pending_statuses: Vec<StatusSummary>,
     failed_statuses: Vec<StatusSummary>,
+}
+
+struct SplitActionRuns {
+    pending: Vec<WorkflowRun>,
+    failed: Vec<WorkflowRun>,
 }
 
 #[async_trait]
@@ -356,5 +393,88 @@ impl Step for CheckBuildFailed {
 impl fmt::Display for CheckBuildFailed {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "check if CI builds failed")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::github::client::MockGithubClient;
+    use crate::github::{ActionRuns, NoBody, WorfklowRunStatus, WorkflowRun};
+    use std::future;
+
+    struct WorkflowRunFixture {
+        pending: WorkflowRun,
+        failed: WorkflowRun,
+    }
+
+    fn make_workflow_run_fixture() -> WorkflowRunFixture {
+        let pending = WorkflowRun {
+            id: 1,
+            workflow_id: 42,
+            name: "Some workflow".into(),
+            head_sha: "mysha".into(),
+            status: WorfklowRunStatus::InProgress,
+            conclusion: None,
+        };
+        let failed = WorkflowRun {
+            status: WorfklowRunStatus::Completed,
+            conclusion: Some(WorkflowRunConclusion::Failure),
+            ..pending.clone()
+        };
+        WorkflowRunFixture { pending, failed }
+    }
+
+    #[tokio::test]
+    async fn test_check_build_failed_actions_pending() {
+        let fixture = make_workflow_run_fixture();
+        let action_runs = ActionRuns {
+            workflow_runs: vec![fixture.pending, fixture.failed],
+        };
+        let mut github = MockGithubClient::default();
+        github
+            .expect_action_runs()
+            .returning(move |_| Box::pin(future::ready(Ok(action_runs.clone()))));
+
+        let pull_request = PullRequest {
+            head: Branch {
+                sha: "mysha".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let step = CheckBuildFailed::new(Arc::new(github), vec![], HashMap::new()).unwrap();
+        let result = step.check_actions(&pull_request).await.unwrap();
+        assert_eq!(result, StepStatus::Waiting);
+    }
+
+    #[tokio::test]
+    async fn test_check_build_failed_actions_failure() {
+        let fixture = make_workflow_run_fixture();
+        let failed_run_id = fixture.failed.id;
+        let action_runs = ActionRuns {
+            workflow_runs: vec![fixture.failed],
+        };
+        let mut github = MockGithubClient::default();
+        github
+            .expect_action_runs()
+            .returning(move |_| Box::pin(future::ready(Ok(action_runs.clone()))));
+        github
+            .expect_rerun_workflow()
+            .withf(move |_repo, run_id| *run_id == failed_run_id)
+            .returning(move |_, _| Box::pin(future::ready(Ok(NoBody {}))));
+
+        let pull_request = PullRequest {
+            head: Branch {
+                sha: "mysha".into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let step = CheckBuildFailed::new(Arc::new(github), vec![], HashMap::new()).unwrap();
+        let result = step.check_actions(&pull_request).await.unwrap();
+        assert_eq!(result, StepStatus::Waiting);
     }
 }

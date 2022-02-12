@@ -214,21 +214,21 @@ impl CheckBuildFailed {
 
     async fn check_statuses(&mut self, pull_request: &PullRequest) -> Result<StepStatus, Error> {
         let summaries = self.fetch_status_summaries(pull_request).await?;
-        let pending = summaries.pending_statuses;
-        let pending_count = pending.len();
-        match pending_count {
+        match summaries.pending.len() {
             0 => {
-                if summaries.failed_statuses.is_empty() {
+                if summaries.failed.is_empty() {
                     return Ok(StepStatus::Passed);
                 }
-                self.process_failed_statuses(summaries.failed_statuses)
-                    .await?;
+                self.process_failed_statuses(summaries.failed).await?;
             }
             1 => {
-                info!("Waiting for external job '{}' to finish", pending[0].name);
+                info!(
+                    "Waiting for external job '{}' to finish",
+                    summaries.pending[0].name
+                );
             }
-            _ => {
-                info!("Waiting for {} external jobs to finish", pending.len());
+            count => {
+                info!("Waiting for {} external jobs to finish", count);
             }
         }
         Ok(StepStatus::Waiting)
@@ -282,8 +282,8 @@ impl CheckBuildFailed {
                 .entry(status.context.clone())
                 .or_insert(status);
         }
-        let mut failed_statuses = Vec::new();
-        let mut pending_statuses = Vec::new();
+        let mut failed = Vec::new();
+        let mut pending = Vec::new();
         for (_, status) in last_run_per_status {
             let url = Self::parse_status_url(&status.target_url)?;
             let summary = StatusSummary {
@@ -291,15 +291,12 @@ impl CheckBuildFailed {
                 name: status.context,
             };
             match status.state {
-                StatusState::Failure => failed_statuses.push(summary),
-                StatusState::Pending => pending_statuses.push(summary),
+                StatusState::Failure => failed.push(summary),
+                StatusState::Pending => pending.push(summary),
                 _ => (),
             };
         }
-        Ok(StatusSummaries {
-            pending_statuses,
-            failed_statuses,
-        })
+        Ok(StatusSummaries { pending, failed })
     }
 
     async fn fetch_action_runs(
@@ -353,8 +350,8 @@ struct StatusSummary {
 }
 
 struct StatusSummaries {
-    pending_statuses: Vec<StatusSummary>,
-    failed_statuses: Vec<StatusSummary>,
+    pending: Vec<StatusSummary>,
+    failed: Vec<StatusSummary>,
 }
 
 struct SplitActionRuns {

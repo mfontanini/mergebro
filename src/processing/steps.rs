@@ -92,7 +92,10 @@ impl CheckReviewsStep {
         for review in reviews {
             match review.state {
                 ReviewState::Approved => users_approved.insert(&review.user.login),
-                _ => users_approved.remove(&review.user.login),
+                ReviewState::ChangesRequested | ReviewState::Dismissed => {
+                    users_approved.remove(&review.user.login)
+                }
+                _ => continue,
             };
         }
         users_approved.len()
@@ -397,7 +400,7 @@ impl fmt::Display for CheckBuildFailed {
 mod tests {
     use super::*;
     use crate::github::client::MockGithubClient;
-    use crate::github::{ActionRuns, NoBody, WorfklowRunStatus, WorkflowRun};
+    use crate::github::{ActionRuns, NoBody, User, WorfklowRunStatus, WorkflowRun};
     use std::future;
 
     struct WorkflowRunFixture {
@@ -420,6 +423,17 @@ mod tests {
             ..pending.clone()
         };
         WorkflowRunFixture { pending, failed }
+    }
+
+    fn make_request_review(user: &str, state: ReviewState) -> PullRequestReview {
+        PullRequestReview {
+            user: User {
+                login: user.into(),
+                ..Default::default()
+            },
+            state,
+            submitted_at: chrono::offset::Local::now(),
+        }
     }
 
     #[tokio::test]
@@ -473,5 +487,44 @@ mod tests {
         let step = CheckBuildFailed::new(Arc::new(github), vec![], HashMap::new()).unwrap();
         let result = step.check_actions(&pull_request).await.unwrap();
         assert_eq!(result, StepStatus::Waiting);
+    }
+
+    #[test]
+    fn test_check_reviews_compute_approvals() {
+        assert_eq!(
+            1,
+            CheckReviewsStep::compute_approvals(&[make_request_review(
+                "bob",
+                ReviewState::Approved
+            )])
+        );
+        assert_eq!(
+            2,
+            CheckReviewsStep::compute_approvals(&[
+                make_request_review("bob", ReviewState::Approved),
+                make_request_review("mike", ReviewState::Approved)
+            ])
+        );
+        assert_eq!(
+            1,
+            CheckReviewsStep::compute_approvals(&[
+                make_request_review("bob", ReviewState::Approved),
+                make_request_review("bob", ReviewState::Commented)
+            ])
+        );
+        assert_eq!(
+            0,
+            CheckReviewsStep::compute_approvals(&[
+                make_request_review("bob", ReviewState::Approved),
+                make_request_review("bob", ReviewState::ChangesRequested)
+            ])
+        );
+        assert_eq!(
+            0,
+            CheckReviewsStep::compute_approvals(&[
+                make_request_review("bob", ReviewState::Approved),
+                make_request_review("bob", ReviewState::Dismissed)
+            ])
+        );
     }
 }

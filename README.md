@@ -31,7 +31,7 @@ The configuration file will be looked up by default in `~/.mergebro/config.yaml`
 
 ### Github
 
-The only required configuration property is your Github username and an API token with `repo` scope.
+The only required configuration property is your Github username and an API token with `repo` scope. You can get the token here: https://github.com/settings/tokens
 
 In order to pass these in via environment variables, use the following:
 
@@ -42,7 +42,7 @@ export MERGEBRO_GITHUB_TOKEN=my_secret_api_token
 
 ### CircleCI
 
-By configuring a CircleCI API token, failed jobs for that service can be re-ran.
+By configuring a CircleCI API token, failed jobs for that service can be re-ran. You can get the token here: https://app.circleci.com/settings/user/tokens
 
 In order to pass it in via an environment variable, use the following:
 
